@@ -192,20 +192,20 @@ function matchesSearch(text: string): boolean {
           <li v-if="mod.types.length && matchesSearch('type')">
             <button
               type="button"
-              class="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-violet-600 dark:text-violet-400 hover:bg-surface-overlay"
+              class="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-kind-type hover:bg-surface-overlay"
               @click="emit('select', { kind: 'module', moduleName: mod.name })"
             >
-              <span class="rounded bg-violet-500/15 px-1.5 py-0.5 font-medium">{{ t('visual.section.type') }}</span>
+              <span class="rounded bg-kind-type/15 px-1.5 py-0.5 font-medium">{{ t('visual.section.type') }}</span>
               <span class="text-content-muted">({{ mod.types.length }})</span>
             </button>
           </li>
           <li v-if="mod.vars.length && matchesSearch('var')">
             <button
               type="button"
-              class="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-emerald-600 dark:text-emerald-400 hover:bg-surface-overlay"
+              class="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs text-kind-var hover:bg-surface-overlay"
               @click="emit('select', { kind: 'module', moduleName: mod.name })"
             >
-              <span class="rounded bg-emerald-500/15 px-1.5 py-0.5 font-medium">{{ t('visual.section.var') }}</span>
+              <span class="rounded bg-kind-var/15 px-1.5 py-0.5 font-medium">{{ t('visual.section.var') }}</span>
               <span class="text-content-muted">({{ mod.vars.length }})</span>
             </button>
           </li>

@@ -397,13 +397,61 @@ function replaceOnce(source: string, from: string, to: string): string | null {
   return source.slice(0, idx) + to + source.slice(idx + from.length)
 }
 
+function isIdentChar(c: string | undefined): boolean {
+  return Boolean(c && /[A-Za-z0-9_\u0080-\uFFFF]/.test(c))
+}
+
+function clipPredicate(text: string): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  return compact.length > 160 ? `${compact.slice(0, 159)}…` : compact
+}
+
+/** Exact match, then a unique whitespace-insensitive match so pretty-printed spacing still formalizes. */
+function replacePredicateText(source: string, from: string, to: string): { source: string } | { error: string } {
+  const exact = replaceOnce(source, from, to)
+  if (exact != null) return { source: exact }
+  const needle = from.replace(/\s+/g, '')
+  if (!needle.trim()) return { error: 'FormalizePredicate fromText is empty.' }
+  const hits: Array<{ start: number; end: number }> = []
+  for (let i = 0; i < source.length; i++) {
+    if (/\s/.test(source[i]!)) continue
+    if (isIdentChar(source[i - 1]) && isIdentChar(needle[0])) continue
+    let si = i
+    let ni = 0
+    let end = i
+    while (si < source.length && ni < needle.length) {
+      if (/\s/.test(source[si]!)) {
+        si += 1
+        continue
+      }
+      if (source[si] !== needle[ni]) break
+      end = si + 1
+      si += 1
+      ni += 1
+    }
+    if (ni !== needle.length) continue
+    if (isIdentChar(source[end]) && isIdentChar(needle[needle.length - 1])) continue
+    hits.push({ start: i, end })
+  }
+  if (hits.length === 1) {
+    const hit = hits[0]!
+    return { source: source.slice(0, hit.start) + to + source.slice(hit.end) }
+  }
+  if (hits.length > 1) {
+    return {
+      error: `Informal text matched ${hits.length} times; quote a longer unique snippet. Text: ${clipPredicate(from)}`
+    }
+  }
+  return { error: `Informal text not found: ${clipPredicate(from)}` }
+}
+
 function applyStepToSource(source: string, step: RefinementStep): { source: string; error?: string } {
   switch (step.kind) {
     case 'FormalizePredicate': {
       if (!step.fromText || step.toText == null) return { source, error: 'FormalizePredicate requires fromText and toText' }
-      const next = replaceOnce(source, step.fromText, step.toText)
-      if (next == null) return { source, error: `Informal text not found: ${step.fromText}` }
-      return { source: next }
+      const next = replacePredicateText(source, step.fromText, step.toText)
+      if ('error' in next) return { source, error: next.error }
+      return { source: next.source }
     }
     case 'DecomposeProcess': {
       if (!step.moduleName || !step.processName || !step.childModuleName) {

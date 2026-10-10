@@ -20,7 +20,7 @@ function buttonClass(index: number): string {
   const variant = props.buttonVariants?.[index] ?? (index === 0 ? 'accent' : 'default')
   if (variant === 'accent') return 'bg-accent text-accent-fg hover:opacity-90'
   if (variant === 'warning') return 'bg-semantic-warning text-white hover:opacity-90 dark:text-black'
-  if (variant === 'danger') return 'bg-danger text-white hover:opacity-90'
+  if (variant === 'danger') return 'bg-danger text-danger-fg hover:opacity-90'
   return 'border border-border-subtle bg-surface-base text-content-primary hover:bg-surface-overlay'
 }
 

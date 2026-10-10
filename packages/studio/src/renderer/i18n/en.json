@@ -886,7 +886,7 @@
   "settings.accentRed": "Red",
   "settings.accentPink": "Pink",
   "settings.accentCustom": "Custom",
-  "settings.customHex": "#2563eb",
+  "settings.customHex": "#00668b",
   "settings.transparency": "Transparency",
   "settings.transparencyHint": "Lower values make the accent color stronger. Default is 50%.",
   "settings.workspaceLayoutPresets": "Workspace layout",

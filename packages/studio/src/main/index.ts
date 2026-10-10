@@ -1,4 +1,8 @@
+import { collectHybridAgentDiagnostics } from '@agile-sofl/editor-api'
+import { setHybridWriteDiagnosticCollector } from '../shared/asflRepair'
 import { conditionNotice, getExperimentConfig } from './services/llm/experiment'
+
+setHybridWriteDiagnosticCollector(collectHybridAgentDiagnostics)
 import { app, ipcMain, BrowserWindow } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'

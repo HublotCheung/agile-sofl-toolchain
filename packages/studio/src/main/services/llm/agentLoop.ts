@@ -15,6 +15,7 @@ import { announceCondition, getExperimentConfig, logTelemetry, semanticDiagnosti
 import { formatHybridInventory, formatHybridDiagnostics, collectHybridAgentDiagnostics, formatRefinementDigest } from '@agile-sofl/editor-api'
 import { formatGuiInventory, numberedGuiSource } from '@agile-sofl/gui'
 import { formatClarificationToolContent } from '../../../shared/clarificationAnswer'
+import { normalizeHybridPatch } from '../../../shared/asflRepair'
 import { numberedSource } from '../../../shared/sourceEdit.js'
 import { projectRefinementState } from '../refinementLog.js'
 import {
@@ -27,6 +28,7 @@ import {
   nextFailedWrite,
   patchFingerprint,
   rejectedToolResult,
+  userInstructionToolResult,
   validateAgentPatch
 } from './agentPatch'
 
@@ -245,6 +247,7 @@ node names are processes in that module; store names are vars; ports match the p
     ? `Dual-line refinement (guide the user; do not auto-refine the whole tree):
 - Journey: Informal → Hybrid+GUI → process atomicity + data discharge + operational grain until the refinement digest reports unambiguous=true.
 - Operational grain: a leaf is not atomic just because pre/post are formal. If the digest lists variations or a name-claim, ask_clarification about those extracted items only, then ClassifyGrain or ResolveVariation. Do not invent operations, and do not clear grainAmbiguity by rewriting pre/post.
+- Predicate text must lex as ASFL. There is no VDM post-state prime and no ^. The final value is the bare name (~x is the initial value). Sequence append is conc(seq, elem). != is <>. Studio rewrites a trailing prime and a clear ^ before the write is kept, and it refuses a write that would add syntax errors. If a tool result says the write was not kept or a patch already failed, rewrite that fragment and re-propose. Do not retry the identical text and do not stop.
 - Empty name-only modules and stub (name-only) processes are gaps. Hybrid generation does not finish the specification.
 - After Hybrid/GUI work for this turn is done, if unambiguous=false, ask_clarification with 2–4 next slices from the digest. Wait for the user unless they already named a slice.
 - Prefer propose_refinement_step, then propose_hybrid_changes. Fallback: propose_source_edit on Hybrid.
@@ -279,6 +282,7 @@ Agile-SOFL conventions:
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.
 
 Never claim you already modified the file. Writes go through propose_* tools. User Apply/Reject (or auto-write) is only a tool result — you MUST continue the same task.
+A tool result with type user_instruction is the user's own words while a change card was still open. That change was neither applied nor rejected. Interpret the words yourself: re-propose the same change if they want it, propose a revision if they want something else, or drop it if they declined. Then continue the task. Do not stop.
 Clarification tool results include "selected" (clicked options) and "custom" (text the user typed). If custom is non-empty, you MUST use it. Single-choice (multiSelect false) does not discard custom, and a clicked option does not override it. When both are present, follow both.
 After any applied write, call read_specification and/or read_hybrid_specification (and read_refinement_state when Hybrid changed), verify inventory, Hybrid Diagnostics, and dual-line gaps, and propose another patch if anything is missing, wrong, or still has syntax errors. Repeat until the current task slice is done.
 When the whole task is done, your LAST message is a short summary of what was completed. Do not wait for the user to say "continue". If Hybrid exists and the digest is not unambiguous, that summary must invite the next refinement slice (ask_clarification) unless the user already declined further refinement.
@@ -789,7 +793,7 @@ export async function runAgentTurn(
               continue
             }
           }
-          const patch: InformalPatchPayload =
+          let patch: InformalPatchPayload =
             call.function.name === 'propose_refinement_step'
               ? {
                   target: 'hybrid',
@@ -844,6 +848,31 @@ export async function runAgentTurn(
             live.content = live.content || `No ${target} write permission.`
             markCallStatus(live, call.id, 'error', sink)
             continue
+          }
+          if (target === 'hybrid') {
+            const normalized = normalizeHybridPatch(patch)
+            patch = normalized.patch
+            if (normalized.unresolved) {
+              const error = `Could not auto-repair illegal ASFL (${normalized.unresolved}).`
+              session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
+                fingerprint: patchFingerprint(patch),
+                error,
+                mode
+              })
+              session.messages.push({
+                id: call.id,
+                role: 'tool',
+                content: JSON.stringify({
+                  ok: false,
+                  error,
+                  next: 'Rewrite ^ as conc(seq, elem) and drop VDM primes. Re-propose a different patch. Do not stop.'
+                }),
+                timestamp: new Date().toISOString()
+              })
+              live.content = live.content || error
+              markCallStatus(live, call.id, 'error', sink)
+              continue
+            }
           }
           const blocked = crudBlockedByFailures(session.context.lastFailedWrite, {
             fingerprint: patchFingerprint(patch),
@@ -1064,7 +1093,7 @@ export async function runAgentTurn(
 
 function completeSiblingToolCalls(
   session: AgentSession,
-  calls: Array<{ id: string }>,
+  calls: Array<{ id: string; function?: { name?: string } }>,
   keepId: string
 ): void {
   for (const call of calls) {
@@ -1073,15 +1102,34 @@ function completeSiblingToolCalls(
     session.messages.push({
       id: call.id,
       role: 'tool',
-      content: JSON.stringify({ skipped: true, reason: 'Paused for a user decision on another tool.' }),
+      content: JSON.stringify({
+        skipped: true,
+        tool: call.function?.name,
+        reason:
+          'Not executed. Another tool in this turn is waiting for Apply or Reject. After that tool result, call this tool again if the work is still needed. Do not treat this skip as a user rejection.'
+      }),
       timestamp: new Date().toISOString()
     })
   }
 }
 
-function parseResumePayload(result: string): { action?: string; error?: string } {
+function parseResumePayload(result: string): {
+  action?: string
+  error?: string
+  userNote?: string
+  repair?: string
+  type?: string
+  text?: string
+} {
   try {
-    const parsed = JSON.parse(result) as { action?: string; error?: string }
+    const parsed = JSON.parse(result) as {
+      action?: string
+      error?: string
+      userNote?: string
+      repair?: string
+      type?: string
+      text?: string
+    }
     if (parsed && typeof parsed === 'object') return parsed
   } catch {
     /* plain text from older clients */
@@ -1110,13 +1158,15 @@ export async function resumeWithToolResult(
     const cfg = getExperimentConfig(projectRoot)
     const op0 = patch.operations?.[0] as { op?: string; kind?: string } | undefined
     const isRefine = op0?.op === 'refine-step'
-    logTelemetry(projectRoot, cfg, session.id, {
-      event: 'proposal_decision',
-      tool: isRefine ? 'propose_refinement_step' : patch.mode === 'source' ? 'propose_source_edit' : `propose_${patch.target ?? 'informal'}_changes`,
-      stepType: isRefine ? String(op0?.kind ?? '') : undefined,
-      decision: payload.action === 'applied' && !payload.error ? 'approved' : payload.action === 'rejected' ? 'rejected' : 'error',
-      toolCallId
-    })
+    if (payload.action === 'applied' || payload.action === 'rejected' || payload.action === 'error') {
+      logTelemetry(projectRoot, cfg, session.id, {
+        event: 'proposal_decision',
+        tool: isRefine ? 'propose_refinement_step' : patch.mode === 'source' ? 'propose_source_edit' : `propose_${patch.target ?? 'informal'}_changes`,
+        stepType: isRefine ? String(op0?.kind ?? '') : undefined,
+        decision: payload.action === 'applied' && !payload.error ? 'approved' : payload.action === 'rejected' ? 'rejected' : 'error',
+        toolCallId
+      })
+    }
     if (payload.action === 'applied' && !payload.error && patch.target === 'hybrid' && ctx.hybridAsfl !== undefined) {
       try {
         logTelemetry(projectRoot, cfg, session.id, {
@@ -1142,10 +1192,15 @@ export async function resumeWithToolResult(
       m.clarification &&
       (m.clarification.pendingToolCallId === toolCallId || session.context.pendingToolCallId === toolCallId)
   )
+  const pendingWrite = session.messages.find(
+    (m) => m.pending && m.proposedChanges && !m.clarification && session.context.pendingToolCallId === toolCallId
+  )
   let toolContent = result
   let clarificationDisplay: string | undefined
-  if (payload.action === 'applied') toolContent = appliedToolResult({ error: payload.error })
-  else if (payload.action === 'error') toolContent = failedToolResult(payload.error || 'Tool failed')
+  if (payload.type === 'user_instruction') toolContent = userInstructionToolResult(payload.text || result)
+  else if (payload.action === 'applied')
+    toolContent = appliedToolResult({ error: payload.error, userNote: payload.userNote, repair: payload.repair })
+  else if (payload.action === 'error') toolContent = failedToolResult(payload.error || 'Tool failed', payload.userNote)
   else if (payload.action === 'rejected') toolContent = rejectedToolResult()
   else if (clarificationMsg?.clarification) {
     const formatted = formatClarificationToolContent(result, {
@@ -1154,6 +1209,11 @@ export async function resumeWithToolResult(
     })
     toolContent = formatted.toolContent
     clarificationDisplay = formatted.display
+  } else if (pendingWrite) {
+    toolContent = failedToolResult(
+      'The pending change was not applied. A chat reply does not reject it.',
+      result
+    )
   } else {
     toolContent = JSON.stringify({
       type: 'clarification_answer',
@@ -1171,9 +1231,15 @@ export async function resumeWithToolResult(
         m.resolution = 'answered'
       }
       if (m.proposedChanges) {
-        m.resolution =
-          payload.action === 'applied' ? 'applied' : payload.action === 'error' ? 'error' : 'rejected'
-        if (payload.error) m.toolError = payload.error
+        if (payload.type === 'user_instruction') {
+          m.resolution = 'answered'
+        } else {
+          const unansweredWrite = !payload.action && pendingWrite
+          m.resolution =
+            payload.action === 'applied' ? 'applied' : payload.action === 'error' || unansweredWrite ? 'error' : 'rejected'
+          if (payload.error) m.toolError = payload.error
+          else if (unansweredWrite) m.toolError = 'Pending change was not applied.'
+        }
       }
     }
   }

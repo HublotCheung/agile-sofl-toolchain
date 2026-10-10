@@ -47,6 +47,17 @@ describe('workspace panel focus and dirty', () => {
     expect(workspace.informalCollapsed).toBe(false)
   })
 
+  it('collapses the project tree column independently of the structure column', () => {
+    const workspace = useWorkspaceStore()
+    workspace.setStructureCollapsed(true)
+    workspace.setInformalCollapsed(true)
+    expect(workspace.informalCollapsed).toBe(true)
+    expect(workspace.structureCollapsed).toBe(true)
+    workspace.setInformalCollapsed(false)
+    expect(workspace.informalCollapsed).toBe(false)
+    expect(workspace.structureCollapsed).toBe(true)
+  })
+
   it('switches structure maps without treating graph as a mode', () => {
     const workspace = useWorkspaceStore()
     expect(workspace.structureMode).toBe('tree')

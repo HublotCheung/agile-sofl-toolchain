@@ -387,11 +387,19 @@ const studio = {
       content: string
       error?: string
     }>,
+  acceptHybridWrite: (payload: { before: string; after: string }) =>
+    ipcRenderer.invoke('studio:accept-hybrid-write', payload) as Promise<{
+      ok: boolean
+      content: string
+      error?: string
+      repairNotes?: string[]
+    }>,
   refinementStep: (payload: { source: string; projectRoot: string; step: Record<string, unknown> }) =>
     ipcRenderer.invoke('studio:refinement-step', JSON.parse(JSON.stringify(payload))) as Promise<{
       source: string
       error?: string
       state: unknown
+      repairNotes?: string[]
     }>,
   refinementState: (payload: { source: string; projectRoot: string }) =>
     ipcRenderer.invoke('studio:refinement-state', JSON.parse(JSON.stringify(payload))) as Promise<unknown>,

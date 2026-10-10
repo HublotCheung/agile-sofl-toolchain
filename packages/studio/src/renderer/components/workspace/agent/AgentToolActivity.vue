@@ -59,7 +59,7 @@ const icon = computed(() => {
     <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none [&::-webkit-details-marker]:hidden">
       <span
         class="inline-flex shrink-0 text-content-muted"
-        :class="live ? 'animate-spin text-accent' : status === 'error' ? 'text-rose-500' : 'text-emerald-600 dark:text-emerald-400'"
+        :class="live ? 'animate-spin text-accent' : status === 'error' ? 'text-semantic-error' : 'text-semantic-success'"
       >
         <StudioIcon :icon="icon" :size="13" />
       </span>

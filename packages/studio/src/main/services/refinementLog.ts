@@ -9,6 +9,7 @@ import {
   type RefinementLogEntry,
   type RefinementStep
 } from '@agile-sofl/editor-api'
+import { acceptHybridWrite } from '../../shared/asflRepair'
 
 function informalGrainNotes(projectRoot: string): AuthorTextNote[] {
   if (!projectRoot) return []
@@ -53,11 +54,14 @@ export function applyProjectRefinementStep(
   projectRoot: string,
   source: string,
   step: RefinementStep
-): ReturnType<typeof applyRefinementStep> {
+): ReturnType<typeof applyRefinementStep> & { repairNotes?: string[] } {
   const log = readRefinementLog(projectRoot)
   const result = applyRefinementStep(source, log, step, informalGrainNotes(projectRoot))
-  if (!result.error) writeRefinementLog(projectRoot, result.log)
-  return result
+  if (result.error) return result
+  const gated = acceptHybridWrite(source, result.source)
+  if (!gated.ok) return { ...result, source, log, error: gated.error }
+  writeRefinementLog(projectRoot, result.log)
+  return { ...result, source: gated.content, repairNotes: gated.repairNotes }
 }
 
 export function projectRefinementState(projectRoot: string, source: string) {

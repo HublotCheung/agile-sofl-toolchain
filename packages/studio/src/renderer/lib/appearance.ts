@@ -1,14 +1,15 @@
 export type AccentId = 'blue' | 'green' | 'orange' | 'purple' | 'yellow' | 'red' | 'pink' | 'custom'
 export type UiZoom = 'small' | 'normal' | 'large' | 'xlarge'
 
+/** OKLCH-authored accents: one hue per preset, lower chroma in dark mode. */
 export const ACCENT_PRESETS: Record<Exclude<AccentId, 'custom'>, { light: string; dark: string }> = {
-  blue: { light: '#2563eb', dark: '#60a5fa' },
-  green: { light: '#0d9488', dark: '#2dd4bf' },
-  orange: { light: '#ea580c', dark: '#fb923c' },
-  purple: { light: '#7c3aed', dark: '#a78bfa' },
-  yellow: { light: '#ca8a04', dark: '#facc15' },
-  red: { light: '#dc2626', dark: '#f87171' },
-  pink: { light: '#db2777', dark: '#f472b6' }
+  blue: { light: '#00668b', dark: '#79b4d2' },
+  green: { light: '#1e6d54', dark: '#82bda5' },
+  orange: { light: '#a14e20', dark: '#e0a07d' },
+  purple: { light: '#6e4993', dark: '#b79dd6' },
+  yellow: { light: '#e2c157', dark: '#e4c973' },
+  red: { light: '#a04038', dark: '#d78f86' },
+  pink: { light: '#9a4873', dark: '#d495b2' }
 }
 
 export const UI_ZOOM_FACTOR: Record<UiZoom, number> = {
@@ -51,13 +52,13 @@ export function accentTintPercent(transparency: number): number {
 
 export function accentForeground(hex: string): string {
   const parsed = normalizeHex(hex)
-  if (!parsed) return '#f8fafc'
+  if (!parsed) return '#f4f3ee'
   const n = Number.parseInt(parsed.slice(1), 16)
   const r = (n >> 16) & 255
   const g = (n >> 8) & 255
   const b = n & 255
   const y = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  return y > 0.62 ? '#111827' : '#f8fafc'
+  return y > 0.62 ? '#322d26' : '#f4f3ee'
 }
 
 export type AppearanceState = {

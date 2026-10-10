@@ -25,7 +25,7 @@ function css(name: string, fallback: string): string {
 
 function theme() {
   return {
-    accent: css('--accent', '#2563eb'),
+    accent: css('--accent', '#00668b'),
     warning: css('--semantic-warning', '#d97706'),
     error: css('--semantic-error', '#e11d48'),
     text: css('--text-primary', '#15202b'),

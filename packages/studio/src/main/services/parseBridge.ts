@@ -1,3 +1,4 @@
+import { acceptHybridWrite } from '../../shared/asflRepair'
 import { ipcMain } from 'electron'
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -220,6 +221,12 @@ export function registerParseHandlers(): void {
 
   ipcMain.handle('studio:hybrid-inventory', (_event, source: string) =>
     cloneForIpc({ inventory: formatHybridInventory(typeof source === 'string' ? source : '') })
+  )
+
+  ipcMain.handle(
+    'studio:accept-hybrid-write',
+    (_event, payload: { before: string; after: string }) =>
+      cloneForIpc(acceptHybridWrite(String(payload?.before ?? ''), String(payload?.after ?? '')))
   )
 
   ipcMain.handle(

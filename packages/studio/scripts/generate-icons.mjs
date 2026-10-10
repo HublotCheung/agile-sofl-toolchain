@@ -31,9 +31,14 @@ if (!existsSync(sourcePath)) {
   process.exit(1)
 }
 
-/** Square-fit with transparent padding so the logo reads clearly at small sizes. */
-function fitSquare(size) {
-  return sharp(sourcePath)
+/** Drop excess transparent margins so the mark fills icon squares at small sizes. */
+async function loadTrimmedLogo() {
+  return sharp(sourcePath).trim().png().toBuffer()
+}
+
+/** Square-fit; only pads when the trimmed artwork is not square. */
+function fitSquare(trimmedLogo, size) {
+  return sharp(trimmedLogo)
     .resize(size, size, {
       fit: 'contain',
       background: { r: 0, g: 0, b: 0, alpha: 0 }
@@ -42,25 +47,33 @@ function fitSquare(size) {
 }
 
 async function main() {
+  const trimmedLogo = await loadTrimmedLogo()
+  const trimmedMeta = await sharp(trimmedLogo).metadata()
+  console.log(
+    `Trimmed logo to ${trimmedMeta.width}×${trimmedMeta.height} (from ${sourcePath.replace(studioRoot, 'packages/studio')})`
+  )
+
   mkdirSync(iconsDir, { recursive: true })
   mkdirSync(join(studioRoot, 'public'), { recursive: true })
 
   for (const size of APP_ICON_SIZES) {
     const out = join(iconsDir, `${size}x${size}.png`)
-    await fitSquare(size).toFile(out)
+    await fitSquare(trimmedLogo, size).toFile(out)
     console.log(`Wrote ${out.replace(studioRoot, 'packages/studio')}`)
   }
 
   const icon512 = join(buildDir, 'icon.png')
-  await fitSquare(512).toFile(icon512)
+  await fitSquare(trimmedLogo, 512).toFile(icon512)
   console.log(`Wrote ${icon512.replace(studioRoot, 'packages/studio')}`)
 
-  const icoBuffers = await Promise.all(ICO_SIZES.map((size) => fitSquare(size).toBuffer()))
+  const icoBuffers = await Promise.all(
+    ICO_SIZES.map((size) => fitSquare(trimmedLogo, size).toBuffer())
+  )
   const ico = await pngToIco(icoBuffers)
   writeFileSync(join(buildDir, 'icon.ico'), ico)
   console.log('Wrote build/icon.ico')
 
-  const icnsSource = await fitSquare(1024).toBuffer()
+  const icnsSource = await fitSquare(trimmedLogo, 1024).toBuffer()
   const icns = png2icons.createICNS(icnsSource, png2icons.BILINEAR, 0)
   if (!icns) {
     console.error('Failed to generate icon.icns')
@@ -69,7 +82,7 @@ async function main() {
   writeFileSync(join(buildDir, 'icon.icns'), icns)
   console.log('Wrote build/icon.icns')
 
-  await fitSquare(TITLEBAR_SIZE).toFile(publicLogoPath)
+  await fitSquare(trimmedLogo, TITLEBAR_SIZE).toFile(publicLogoPath)
   console.log(`Wrote ${publicLogoPath.replace(studioRoot, 'packages/studio')}`)
 }
 

@@ -76,7 +76,32 @@ export function validateAgentPatch(
   }
   for (const op of patch.operations) {
     const kind = String(op.op || '')
-    if (kind === 'refine-step') continue
+    if (kind === 'refine-step') {
+      const stepKind = String(op.kind || '')
+      if (!stepKind) return { ok: false, message: 'refine-step requires kind.' }
+      if (stepKind === 'FormalizePredicate') {
+        if (!String(op.fromText ?? '').trim() || op.toText == null || !String(op.toText).trim()) {
+          return {
+            ok: false,
+            message: 'FormalizePredicate requires fromText (the current informal sentence) and toText (legal ASFL).'
+          }
+        }
+      }
+      if (stepKind === 'ClassifyGrain') {
+        const grain = String(op.grainClass ?? '')
+        if (
+          !String(op.moduleName ?? '').trim() ||
+          !String(op.processName ?? '').trim() ||
+          (grain !== 'operation' && grain !== 'abstract')
+        ) {
+          return {
+            ok: false,
+            message: 'ClassifyGrain requires moduleName, processName, and grainClass operation|abstract.'
+          }
+        }
+      }
+      continue
+    }
     if (kind === 'replace-document' || typeof op.asflText === 'string') {
       return {
         ok: false,
@@ -144,10 +169,7 @@ export function crudBlockedByFailures(
   if (incoming.mode === 'source') return null
   if (!lastFailed) return null
   if (lastFailed.fingerprint === incoming.fingerprint) {
-    return 'This CRUD patch already failed. Do not retry it. Call read_specification and/or read_hybrid_specification with view=source, then propose_source_edit (replace/append/replace-document).'
-  }
-  if (lastFailed.mode !== 'source' && lastFailed.count >= 2) {
-    return 'CRUD has failed repeatedly. Call read_* with view=source, then propose_source_edit to unstick. CRUD is blocked until a source edit is applied.'
+    return 'This patch already failed. Do not retry it unchanged. Read the error, rewrite the fragment (legal ASFL, a unique fromText) or propose_source_edit, then continue.'
   }
   return null
 }
@@ -170,12 +192,17 @@ export function continuationUserText(lastToolContent?: string, failures = 0): st
   if (clarification) return clarification
   let action: string | undefined
   let error: string | undefined
+  let instruction: string | undefined
   try {
-    const parsed = JSON.parse(lastToolContent || '{}') as { action?: string; error?: string }
+    const parsed = JSON.parse(lastToolContent || '{}') as { action?: string; error?: string; type?: string; text?: string }
     action = parsed.action
     error = parsed.error
+    if (parsed.type === 'user_instruction') instruction = parsed.text || ''
   } catch {
     /* plain clarification answer */
+  }
+  if (instruction != null) {
+    return `The user wrote this while a proposed change was still unconfirmed: ${instruction}. That change was neither applied nor rejected. Interpret their meaning and act now: re-propose the same change if they want it, propose a revision if they want something different, or leave it if they declined. Then continue the task. Do not stop and do not wait.`
   }
   const sourceHint =
     'If CRUD cannot express the fix, call read_* with view=source, then propose_source_edit (replace/append/replace-document). That is allowed.'
@@ -186,7 +213,7 @@ export function continuationUserText(lastToolContent?: string, failures = 0): st
     return 'The patch was applied. Immediately call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed). Compare with the plan, and either propose the next incremental CRUD/refinement step or write a final summary. If the refinement digest is not unambiguous, invite the next slice with ask_clarification. Do not wait for a new user message.'
   }
   if (action === 'error' || failures >= 2) {
-    return `The write failed: ${error || 'unknown error'}. This is a tool result, not a stopped session. Do not retry the same CRUD patch. Call read_specification and/or read_hybrid_specification with view=source, then propose_source_edit to unstick (replace a unique snippet, append, or replace-document). Then verify. Do not stop with an empty message.`
+    return `The write failed: ${error || 'unknown error'}. This is a tool result, not a stopped session. Do not retry the same patch unchanged. Rewrite it (legal ASFL, unique fromText) and re-propose, or call read_specification and/or read_hybrid_specification with view=source, then propose_source_edit to unstick (replace a unique snippet, append, or replace-document). Then verify. Do not stop with an empty message.`
   }
   if (action === 'rejected') {
     return 'The user rejected that patch. Adjust: ask_clarification if needed, propose a smaller CRUD patch, or use propose_source_edit if the file itself is stuck. Do not stop with an empty message.'
@@ -194,14 +221,31 @@ export function continuationUserText(lastToolContent?: string, failures = 0): st
   return 'Continue now. Prefer propose_changes / propose_hybrid_changes. If those fail, read source and propose_source_edit. After writes, read the spec to verify. When the task is done, write a short summary and stop. Do not reply with an empty message.'
 }
 
-export function appliedToolResult(extra?: { error?: string }): string {
+export function appliedToolResult(extra?: { error?: string; userNote?: string; repair?: string }): string {
+  const notes = [
+    extra?.repair ? `Auto-repair kept the write legal: ${extra.repair}.` : '',
+    extra?.userNote ? `The user also said: ${extra.userNote}. Follow that after verifying.` : ''
+  ].filter(Boolean)
+  const next = extra?.error
+    ? `Some operations failed: ${extra.error}. Read the inventory (and view=source if needed). Follow up with a corrected CRUD or propose_source_edit. Do not stop.`
+    : 'Call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed) to verify. If syntax errors remain, fix them before the next step. If more work remains, propose the next CRUD or propose_refinement_step (or propose_source_edit if CRUD cannot express it). If Hybrid still has dual-line gaps, ask_clarification for the next slice. If the task is complete, write a short summary and stop.'
   return JSON.stringify({
     action: 'applied',
     ok: !extra?.error,
     error: extra?.error,
-    next: extra?.error
-      ? `Some operations failed: ${extra.error}. Read the inventory (and view=source if needed). Follow up with CRUD or propose_source_edit. Do not stop.`
-      : 'Call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed) to verify. If more work remains, propose the next CRUD or propose_refinement_step (or propose_source_edit if CRUD cannot express it). If Hybrid still has dual-line gaps, ask_clarification for the next slice. If the task is complete, write a short summary and stop.'
+    repair: extra?.repair,
+    userNote: extra?.userNote,
+    next: [next, ...notes].join(' ')
+  })
+}
+
+export function userInstructionToolResult(text: string): string {
+  return JSON.stringify({
+    type: 'user_instruction',
+    applied: false,
+    rejected: false,
+    text,
+    next: 'The user wrote this while your proposed change was still unconfirmed. It was neither applied nor rejected. Interpret their meaning: re-propose the same change if they want it, propose a revision if they want something else, or drop it if they declined. Then continue the task. Do not stop.'
   })
 }
 
@@ -217,11 +261,17 @@ export function assistantTurnIsComplete(content: string, toolCallCount: number):
   return toolCallCount === 0 && content.trim().length > 0
 }
 
-export function failedToolResult(error: string): string {
+export function failedToolResult(error: string, userNote?: string): string {
   return JSON.stringify({
     action: 'error',
     ok: false,
     error,
-    next: 'Tool failed. Do not retry the identical CRUD. Read inventory and view=source, then propose_source_edit if needed. Do not stop the task.'
+    userNote: userNote || undefined,
+    next: [
+      'Tool failed. Do not retry the identical patch. Read the error, rewrite the fragment, and re-propose. If CRUD cannot express the fix, read inventory and view=source, then propose_source_edit. Do not stop the task.',
+      userNote ? `The user also said: ${userNote}` : ''
+    ]
+      .filter(Boolean)
+      .join(' ')
   })
 }

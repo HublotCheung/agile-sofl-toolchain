@@ -5,6 +5,7 @@ import {
   crudBlockedByFailures,
   failedToolResult,
   nextFailedWrite,
+  userInstructionToolResult,
   validateAgentPatch
 } from '../src/main/services/llm/agentPatch'
 import {
@@ -115,6 +116,15 @@ describe('continuationUserText', () => {
     expect(text).toMatch(/propose_source_edit/)
   })
 
+  it('asks the model to interpret a message left on an open change card', () => {
+    const raw = userInstructionToolResult('继续，把 Login 标成 operation')
+    const text = continuationUserText(raw)
+    expect(text).toMatch(/继续，把 Login 标成 operation/)
+    expect(text).toMatch(/neither applied nor rejected/)
+    expect(text).toMatch(/Do not stop/)
+    expect(JSON.parse(raw).type).toBe('user_instruction')
+  })
+
   it('forces source edit after repeated failures', () => {
     const text = continuationUserText(JSON.stringify({ action: 'error', error: 'skip' }), 2)
     expect(text).toMatch(/propose_source_edit/)
@@ -144,12 +154,12 @@ describe('crudBlockedByFailures', () => {
     expect(msg).toMatch(/propose_source_edit/)
   })
 
-  it('blocks further CRUD after two failures even with a new fingerprint', () => {
+  it('allows a different patch so refinement can continue after earlier failures', () => {
     const msg = crudBlockedByFailures(
       { fingerprint: 'old', error: 'x', count: 2, mode: 'crud' },
       { fingerprint: 'new', mode: 'crud' }
     )
-    expect(msg).toMatch(/repeatedly/)
+    expect(msg).toBeNull()
   })
 
   it('never blocks source edits', () => {
@@ -168,7 +178,8 @@ describe('nextFailedWrite', () => {
     const second = nextFailedWrite(first, { fingerprint: 'b', error: 'e2', mode: 'crud' })
     expect(first.count).toBe(1)
     expect(second.count).toBe(2)
-    expect(crudBlockedByFailures(second, { fingerprint: 'c', mode: 'crud' })).toMatch(/repeatedly/)
+    expect(crudBlockedByFailures(second, { fingerprint: 'c', mode: 'crud' })).toBeNull()
+    expect(crudBlockedByFailures(second, { fingerprint: 'b', mode: 'crud' })).toMatch(/already failed/)
   })
 })
 

@@ -27,7 +27,7 @@ var
     price_keys: PriceKeys;
     active_carts: ActiveCustomers;
 inv
-    forall[: price_keys] | p > 0 and tax_rate >= 0 and cart_limit > 0;
+    forall[p: price_keys] | p > 0 and tax_rate >= 0 and cart_limit > 0;
 process AddToCart (customer: CustomerId, product: ProductId) ok: nat
     ext
     rd inventory: Inventory

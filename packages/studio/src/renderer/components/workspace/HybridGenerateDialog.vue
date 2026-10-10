@@ -274,8 +274,8 @@ async function onGenerate(): Promise<void> {
           </label>
         </div>
         <pre v-if="!isAgent && preview" class="max-h-[240px] overflow-auto rounded-md bg-surface-base p-3 text-[12px] text-content-primary studio-scroll">{{ preview }}</pre>
-        <p v-for="w in warnings" :key="w" class="text-[12px] text-amber-600">{{ w }}</p>
-        <p v-if="error" class="text-[12px] text-rose-500">{{ error }}</p>
+        <p v-for="w in warnings" :key="w" class="text-[12px] text-semantic-warning">{{ w }}</p>
+        <p v-if="error" class="text-[12px] text-semantic-error">{{ error }}</p>
       </div>
       <footer class="flex flex-wrap justify-end gap-2 border-t border-border-subtle px-4 py-3">
         <button type="button" class="rounded-md border border-border-subtle px-3 py-1.5 text-[12px]" @click="emit('close')">

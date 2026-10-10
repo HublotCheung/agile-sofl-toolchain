@@ -79,7 +79,7 @@ function readStoredSplitRatios(): Record<SplitRatioKey, number> {
 export const useSettingsStore = defineStore('settings', () => {
   const open = ref(false)
   const accentId = ref<AccentId>(readAccentId())
-  const customHex = ref(localStorage.getItem('studio-accent-custom') || '#2563eb')
+  const customHex = ref(localStorage.getItem('studio-accent-custom') || '#00668b')
   const transparency = ref(readTransparency())
   const zoom = ref<UiZoom>(readZoom())
   const defaultInformalView = ref<InformalViewMode>(readInformalDefault())

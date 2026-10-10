@@ -29,7 +29,7 @@ var
     alert_queue: AlertQueue;
     open_alerts: nat;
 inv
-    forall[: sensors] | s > 0 and open_alerts >= 0 and max_alerts > 0;
+    forall[s: sensors] | s > 0 and open_alerts >= 0 and max_alerts > 0;
 process InitCity ()
     FSF :
     others && open_alerts = 0
@@ -75,7 +75,7 @@ process ReconcileZones ()
     rd zones: ZoneMap
     wr zones: ZoneMap
     FSF :
-    others && open_alerts = open_alerts
+    others && zones = ~zones
 end_process
 function peak_hour_check(hour: nat): nat
     == hour
@@ -121,8 +121,8 @@ process ReportCongestion (count: nat)
     ext
     wr congested: nat
     FSF :
-    count >= 0 && count = count ||
-    others && count = 0
+    count >= 0 && congested = count ||
+    others && congested = 0
 end_process
 process SyncSensors ()
     ext
@@ -249,13 +249,13 @@ process WarmSensors ()
     rd sensors: SensorSet
     wr sensors: SensorSet
     FSF :
-    true && open_alerts = 0
+    true && sensors = ~sensors
     decom: SyncSensors
 end_process
 process SeedZones ()
     ext
     wr zones: ZoneMap
     FSF :
-    true && open_alerts = 0
+    true && zones = ~zones
 end_process
 end_module

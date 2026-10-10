@@ -51,8 +51,10 @@ type AgentMessageView = AgentSessionPayload['messages'][0]
 
 const props = defineProps<{
   informalMarkdown: string
-  onApplyPatch: (patch: InformalPatchPayload) => Promise<{ ok: boolean; error?: string; applied?: boolean }>
-  onApplyHybridPatch: (patch: InformalPatchPayload) => Promise<{ ok: boolean; error?: string; applied?: boolean }>
+  onApplyPatch: (patch: InformalPatchPayload) => Promise<{ ok: boolean; error?: string; applied?: boolean; repairNotes?: string[] }>
+  onApplyHybridPatch: (
+    patch: InformalPatchPayload
+  ) => Promise<{ ok: boolean; error?: string; applied?: boolean; repairNotes?: string[] }>
   embedInDock?: boolean
 }>()
 
@@ -208,6 +210,20 @@ async function send(text?: string): Promise<void> {
   }
   const pendingId = session.value?.context.pendingToolCallId
   if (pendingId) {
+    const pendingWrite = session.value?.messages.find(
+      (m) => m.pending && m.proposedChanges && !m.clarification
+    )
+    if (pendingWrite) {
+      if (fromInput) input.value = ''
+      if (settings.agentWriteMode === 'auto') {
+        await applyPatch(pendingWrite, body)
+        await maybeAutoApply()
+        return
+      }
+      await resume(pendingId, JSON.stringify({ type: 'user_instruction', text: body }), true)
+      await maybeAutoApply()
+      return
+    }
     if (fromInput) input.value = ''
     await resume(pendingId, clarificationResumePayload(pendingId, body), true)
     return
@@ -220,6 +236,7 @@ async function send(text?: string): Promise<void> {
   pinThreadToBottom = true
   turnInFlight = true
   busy.value = true
+  agentCalls += 1
   try {
     const next = await window.studio.agentChat(
       toIpcValue({
@@ -232,15 +249,16 @@ async function send(text?: string): Promise<void> {
     if (!stillOnProject(rootAtStart)) return
     session.value = next
     await refresh()
-    await maybeAutoApply()
   } catch (e) {
     if (!stillOnProject(rootAtStart)) return
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
+    agentCalls -= 1
     busy.value = false
-    turnInFlight = false
     await nextTick()
     thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
+    if (!stopRequested) await maybeAutoApply()
+    turnInFlight = false
     if (!stopRequested) await flushQueue()
   }
 }
@@ -341,6 +359,7 @@ async function resume(toolCallId: string, result: string, continueTurn = true): 
   const rootAtStart = projectRoot.value
   pinThreadToBottom = true
   busy.value = true
+  agentCalls += 1
   try {
     const next = await window.studio.agentResume(
       toIpcValue({
@@ -359,51 +378,72 @@ async function resume(toolCallId: string, result: string, continueTurn = true): 
     if (!stillOnProject(rootAtStart)) return
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
+    agentCalls -= 1
     busy.value = false
     await nextTick()
     thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
-    if (!turnInFlight && !stopRequested) await flushQueue()
+    if (!stopRequested) await maybeAutoApply()
+    if (!turnInFlight && !autoApplyLock && !stopRequested) await flushQueue()
   }
 }
 
-async function applyPatch(msg: AgentMessageView): Promise<boolean> {
+async function applyPatch(msg: AgentMessageView, userNote?: string): Promise<boolean> {
   if (stopRequested) return false
   const rootAtStart = projectRoot.value
   if (!stillOnProject(rootAtStart)) return false
   if (!msg.proposedChanges) return false
-  const patch = JSON.parse(JSON.stringify(msg.proposedChanges)) as InformalPatchPayload
-  const result =
-    patch.target === 'hybrid'
-      ? await props.onApplyHybridPatch(patch)
-      : patch.target === 'gui'
-        ? await applyGuiDocumentPatch(patch, {
-            noTab: t('agent.noGuiTab'),
-            applyFailed: t('agent.applyFailed')
-          })
-        : await props.onApplyPatch(patch)
-  if (!stillOnProject(rootAtStart)) return false
-  const continueTurn = !stopRequested
   const toolId = session.value?.context.pendingToolCallId
-  if (result.ok) {
+  const continueTurn = !stopRequested
+  try {
+    const patch = JSON.parse(JSON.stringify(msg.proposedChanges)) as InformalPatchPayload
+    const result =
+      patch.target === 'hybrid'
+        ? await props.onApplyHybridPatch(patch)
+        : patch.target === 'gui'
+          ? await applyGuiDocumentPatch(patch, {
+              noTab: t('agent.noGuiTab'),
+              applyFailed: t('agent.applyFailed')
+            })
+          : await props.onApplyPatch(patch)
+    if (!stillOnProject(rootAtStart)) return false
+    const repair =
+      'repairNotes' in result ? result.repairNotes?.filter(Boolean).join('; ') : undefined
+    if (result.ok) {
+      error.value = ''
+      if (!toolId) return false
+      await resume(
+        toolId,
+        JSON.stringify({ action: 'applied', userNote, repair: repair || undefined }),
+        continueTurn
+      )
+      return true
+    }
     error.value = ''
-    if (!toolId) return false
-    await resume(toolId, JSON.stringify({ action: 'applied' }), continueTurn)
-    return true
-  }
-  error.value = ''
-  if (!toolId) {
-    error.value = result.error || t('agent.applyFailed')
+    if (!toolId) {
+      error.value = result.error || t('agent.applyFailed')
+      return false
+    }
+    await resume(
+      toolId,
+      JSON.stringify({
+        action: result.applied ? 'applied' : 'error',
+        error: result.error || t('agent.applyFailed'),
+        userNote,
+        repair: repair || undefined
+      }),
+      continueTurn
+    )
+    return false
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    if (!stillOnProject(rootAtStart)) return false
+    if (!toolId) {
+      error.value = message
+      return false
+    }
+    await resume(toolId, JSON.stringify({ action: 'error', error: message, userNote }), continueTurn)
     return false
   }
-  await resume(
-    toolId,
-    JSON.stringify({
-      action: result.applied ? 'applied' : 'error',
-      error: result.error || t('agent.applyFailed')
-    }),
-    continueTurn
-  )
-  return false
 }
 
 async function rejectPatch(_msg: AgentMessageView): Promise<void> {
@@ -413,10 +453,13 @@ async function rejectPatch(_msg: AgentMessageView): Promise<void> {
 }
 
 const autoApplyTried = new Set<string>()
+let agentCalls = 0
+let autoApplyLock = false
 
 async function maybeAutoApply(): Promise<void> {
   if (settings.agentWriteMode !== 'auto') return
   if (!stillOnProject(projectRoot.value)) return
+  if (agentCalls > 0 || autoApplyLock) return
   const pending = session.value?.messages.find((m) => m.pending && m.proposedChanges)
   if (!pending) return
   if (stopRequested) {
@@ -425,8 +468,19 @@ async function maybeAutoApply(): Promise<void> {
     return
   }
   if (autoApplyTried.has(pending.id)) return
+  autoApplyLock = true
   autoApplyTried.add(pending.id)
-  await applyPatch(pending)
+  let applied = false
+  try {
+    applied = await applyPatch(pending)
+  } finally {
+    autoApplyLock = false
+  }
+  if (!applied) {
+    const stillPending = session.value?.messages.some((m) => m.id === pending.id && m.pending && m.proposedChanges)
+    if (stillPending) autoApplyTried.delete(pending.id)
+    return
+  }
   await maybeAutoApply()
 }
 
@@ -599,6 +653,7 @@ async function launchFromBootstrap(req: HybridAgentBootstrapPayload): Promise<vo
   launchInFlight = true
   error.value = ''
   showArchived.value = false
+  let launchOpenedAgent = false
   try {
     if (!projectRoot.value || !window.studio?.agentCreateSession) {
       error.value = t('informal.startGenerateFailed')
@@ -627,6 +682,8 @@ async function launchFromBootstrap(req: HybridAgentBootstrapPayload): Promise<vo
     pinThreadToBottom = true
     turnInFlight = true
     busy.value = true
+    agentCalls += 1
+    launchOpenedAgent = true
     session.value = await window.studio.agentChat(
       toIpcValue({
         projectRoot: projectRoot.value,
@@ -641,12 +698,13 @@ async function launchFromBootstrap(req: HybridAgentBootstrapPayload): Promise<vo
       })
     )
     await refresh()
-    await maybeAutoApply()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
+    if (launchOpenedAgent) agentCalls -= 1
     launchInFlight = false
     busy.value = false
+    if (!stopRequested) await maybeAutoApply()
     turnInFlight = false
     await nextTick()
     thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
@@ -1019,7 +1077,7 @@ function permBadge(s: AgentSessionPayload): string {
               </li>
             </ul>
           </div>
-          <p v-if="error" class="text-[12px] text-rose-500">{{ error }}</p>
+          <p v-if="error" class="text-[12px] text-semantic-error">{{ error }}</p>
         </div>
         <div class="shrink-0 border-t border-border-subtle">
           <ul v-if="queuedMessages.length" class="max-h-28 overflow-y-auto studio-scroll px-2 py-1">
@@ -1129,7 +1187,7 @@ function permBadge(s: AgentSessionPayload): string {
             class="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg p-2.5 disabled:opacity-40"
             :class="
               composerMode === 'stop'
-                ? 'bg-rose-600 text-white hover:bg-rose-500'
+                ? 'bg-danger text-danger-fg hover:opacity-90'
                 : 'bg-accent text-accent-fg'
             "
             :title="

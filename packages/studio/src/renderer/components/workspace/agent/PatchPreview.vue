@@ -63,10 +63,10 @@ function label(op: Record<string, unknown>): string {
 function tone(op: Record<string, unknown>): string {
   const kind = String(op.op || '')
   if (kind === 'add' || kind === 'append' || kind === 'add-screen' || kind === 'add-widget' || kind === 'insert-html')
-    return 'text-emerald-700 dark:text-emerald-300'
-  if (kind === 'remove' || kind === 'remove-screen' || kind === 'remove-node') return 'text-rose-700 dark:text-rose-300'
+    return 'text-semantic-success'
+  if (kind === 'remove' || kind === 'remove-screen' || kind === 'remove-node') return 'text-semantic-error'
   if (kind === 'replace' || kind === 'replace-document' || kind === 'replace-html' || kind === 'replace-screen-html')
-    return 'text-amber-700 dark:text-amber-300'
+    return 'text-semantic-warning'
   return 'text-content-secondary'
 }
 </script>
@@ -82,7 +82,7 @@ function tone(op: Record<string, unknown>): string {
             ? $t('agent.patchTargetGui')
             : $t('agent.patchTargetInformal')
       }}</span>
-      <span v-if="sourceMode" class="ml-1 font-normal normal-case text-amber-600 dark:text-amber-400">{{
+      <span v-if="sourceMode" class="ml-1 font-normal normal-case text-semantic-warning">{{
         $t('agent.patchModeSource')
       }}</span>
     </p>
@@ -110,9 +110,9 @@ function tone(op: Record<string, unknown>): string {
       }}
     </p>
     <p v-else-if="resolution === 'rejected'" class="mt-2 text-[12px] text-content-muted">{{ $t('agent.rejected') }}</p>
-    <p v-else-if="resolution === 'error'" class="mt-2 text-[12px] text-rose-500">
+    <p v-else-if="resolution === 'error'" class="mt-2 text-[12px] text-semantic-error">
       {{ $t('agent.patchToolFailed') }}
-      <span v-if="toolError" class="mt-1 block whitespace-pre-wrap break-words font-normal text-rose-400">{{
+      <span v-if="toolError" class="mt-1 block whitespace-pre-wrap break-words font-normal text-semantic-error">{{
         toolError
       }}</span>
     </p>

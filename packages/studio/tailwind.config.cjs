@@ -34,9 +34,22 @@ module.exports = {
         },
         semantic: {
           warning: 'var(--semantic-warning)',
-          error: 'var(--semantic-error)'
+          error: 'var(--semantic-error)',
+          success: 'var(--semantic-success)'
         },
-        danger: 'var(--danger)',
+        danger: {
+          DEFAULT: 'var(--danger)',
+          fg: 'var(--danger-fg)'
+        },
+        kind: {
+          type: 'var(--kind-type)',
+          var: 'var(--kind-var)'
+        },
+        section: {
+          functions: 'var(--section-functions)',
+          data: 'var(--section-data)',
+          constraints: 'var(--section-constraints)'
+        },
         gui: {
           canvas: 'var(--gui-canvas)',
           'canvas-soft': 'var(--gui-canvas-soft)',

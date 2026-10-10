@@ -3,48 +3,60 @@
 @tailwind utilities;
 
 :root {
-  --accent-raw: #2563eb;
+  /* Warm mineral paper. Hex is the sRGB rendering of an OKLCH ramp (hue ~80–95, low chroma).
+     Mixes stay in oklab so an accent tint does not go muddy. */
+  --accent-raw: #00668b;
   --accent-mix: 80%;
   --accent-tint: 8%;
   --accent-tint-n: 8;
-  --accent-mute: #ffffff;
-  --accent-fg: #f8fafc;
+  --accent-mute: #fcfbf8;
+  --accent-fg: #f4f3ee;
   --ui-zoom: 1;
-  --surface-base-raw: #eef1f4;
-  --surface-raised-raw: #ffffff;
-  --surface-overlay-raw: #f3f5f7;
-  --surface-base: color-mix(in srgb, var(--accent-raw) calc(var(--accent-tint-n) * 1%), var(--surface-base-raw));
-  --surface-raised: color-mix(in srgb, var(--accent-raw) calc(var(--accent-tint-n) * 0.4%), var(--surface-raised-raw));
-  --surface-overlay: color-mix(in srgb, var(--accent-raw) calc(var(--accent-tint-n) * 0.7%), var(--surface-overlay-raw));
-  --text-primary: #15202b;
-  --text-secondary: #4a5560;
-  --text-muted: #7a8490;
-  --accent: color-mix(in srgb, var(--accent-raw) var(--accent-mix), var(--accent-mute));
-  --border-subtle: color-mix(in srgb, var(--accent-raw) 12%, #d8dee6);
-  --danger: #e11d48;
+  --surface-base-raw: #f2f1ed;
+  --surface-raised-raw: #fcfbf8;
+  --surface-overlay-raw: #edece6;
+  --surface-base: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.4%), var(--surface-base-raw));
+  --surface-raised: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.18%), var(--surface-raised-raw));
+  --surface-overlay: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.32%), var(--surface-overlay-raw));
+  --text-primary: #322d26;
+  --text-secondary: #56524b;
+  --text-muted: #6d6861;
+  --accent: color-mix(in oklab, var(--accent-raw) var(--accent-mix), var(--accent-mute));
+  --border-subtle: color-mix(in oklab, var(--accent-raw) 8%, #dad7d0);
+  --danger: #9c433f;
+  --danger-fg: #f4f3ee;
   --field-bg: var(--surface-raised);
   --field-border: var(--border-subtle);
   --field-border-focus: var(--accent);
-  --role-process: #0ea5e9;
-  --role-function: #f97316;
-  --map-frontend: #0891b2;
-  --map-backend: #059669;
-  --map-database: #7c3aed;
-  --map-process: #0284c7;
-  --map-store: #6d28d9;
-  --map-external: #64748b;
-  --map-start: #059669;
-  --map-active: #0891b2;
-  --map-waiting: #d97706;
-  --map-decision: #ea580c;
-  --map-success: #059669;
-  --map-failure: #e11d48;
-  --semantic-warning: #d97706;
-  --semantic-error: #e11d48;
+  --role-process: #146272;
+  --role-function: #9b532a;
+  --map-frontend: #0e6c66;
+  --map-backend: #326541;
+  --map-database: #535088;
+  --map-process: #146272;
+  --map-store: #694a77;
+  --map-external: #66635a;
+  --map-start: #326541;
+  --map-active: #0e6c66;
+  --map-waiting: #856214;
+  --map-decision: #9b532a;
+  --map-success: #326541;
+  --map-failure: #9c433f;
+  --semantic-warning: #856214;
+  --semantic-error: #9c433f;
+  --semantic-success: #326541;
+  --kind-type: #535088;
+  --kind-var: #326541;
+  --section-functions: #146272;
+  --section-data: #856214;
+  --section-constraints: #535088;
   --scrollbar-size: 6px;
-  --scrollbar-track: color-mix(in srgb, var(--accent-raw) 8%, transparent);
-  --scrollbar-thumb: color-mix(in srgb, var(--accent-raw) 22%, rgba(21, 32, 43, 0.22));
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent-raw) 35%, rgba(21, 32, 43, 0.38));
+  --scrollbar-track: color-mix(in oklab, var(--accent-raw) 8%, transparent);
+  --scrollbar-thumb: color-mix(in oklab, var(--accent-raw) 16%, rgba(50, 45, 38, 0.28));
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--accent-raw) 28%, rgba(50, 45, 38, 0.42));
+  --git-modified: #7e5c2a;
+  --git-added: #346c42;
+  --git-deleted: #9c443b;
   --gui-canvas: #f7f7f4;
   --gui-canvas-soft: #fafaf7;
   --gui-ink: #26251e;
@@ -58,9 +70,6 @@
   --gui-timeline-read: #9fbbe0;
   --gui-timeline-edit: #c0a8dd;
   --gui-timeline-done: #c08532;
-  --git-modified: #e2c08d;
-  --git-added: #73c991;
-  --git-deleted: #c74e39;
 }
 
 .git-status-modified { color: var(--git-modified) !important; }
@@ -68,43 +77,53 @@
 .git-status-deleted, .git-status-conflicted { color: var(--git-deleted) !important; }
 
 .dark {
-  --accent-raw: #60a5fa;
-  --accent-mute: #0f172a;
-  --accent-fg: #0b1220;
-  --surface-base-raw: #12161c;
-  --surface-raised-raw: #1a2028;
-  --surface-overlay-raw: #242c36;
-  --surface-base: color-mix(in srgb, var(--accent-raw) calc(var(--accent-tint-n) * 1%), var(--surface-base-raw));
-  --surface-raised: color-mix(in srgb, var(--accent-raw) calc(var(--accent-tint-n) * 0.45%), var(--surface-raised-raw));
-  --surface-overlay: color-mix(in srgb, var(--accent-raw) calc(var(--accent-tint-n) * 0.75%), var(--surface-overlay-raw));
-  --text-primary: #e8eef4;
-  --text-secondary: #b0bcc8;
-  --text-muted: #7f8b97;
-  --accent: color-mix(in srgb, var(--accent-raw) var(--accent-mix), var(--accent-mute));
-  --border-subtle: color-mix(in srgb, var(--accent-raw) 16%, #2d3844);
-  --danger: #fb7185;
+  --accent-raw: #79b4d2;
+  --accent-mute: #1a1814;
+  --accent-fg: #322d26;
+  --surface-base-raw: #1a1814;
+  --surface-raised-raw: #25221f;
+  --surface-overlay-raw: #302d29;
+  --surface-base: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.4%), var(--surface-base-raw));
+  --surface-raised: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.18%), var(--surface-raised-raw));
+  --surface-overlay: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.32%), var(--surface-overlay-raw));
+  --text-primary: #e9e8e2;
+  --text-secondary: #bfbeb7;
+  --text-muted: #9b9890;
+  --accent: color-mix(in oklab, var(--accent-raw) var(--accent-mix), var(--accent-mute));
+  --border-subtle: color-mix(in oklab, var(--accent-raw) 12%, #403d37);
+  --danger: #de958e;
+  --danger-fg: #322d26;
   --field-bg: var(--surface-raised);
   --field-border: var(--border-subtle);
   --field-border-focus: var(--accent);
-  --role-process: #38bdf8;
-  --role-function: #fb923c;
-  --map-frontend: #22d3ee;
-  --map-backend: #34d399;
-  --map-database: #a78bfa;
-  --map-process: #38bdf8;
-  --map-store: #c4b5fd;
-  --map-external: #94a3b8;
-  --map-start: #34d399;
-  --map-active: #22d3ee;
-  --map-waiting: #fbbf24;
-  --map-decision: #fb923c;
-  --map-success: #34d399;
-  --map-failure: #fb7185;
-  --semantic-warning: #fbbf24;
-  --semantic-error: #fb7185;
-  --scrollbar-track: color-mix(in srgb, var(--accent-raw) 10%, transparent);
-  --scrollbar-thumb: color-mix(in srgb, var(--accent-raw) 28%, rgba(255, 255, 255, 0.12));
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent-raw) 42%, rgba(255, 255, 255, 0.2));
+  --role-process: #89bbc7;
+  --role-function: #dba383;
+  --map-frontend: #8bc4be;
+  --map-backend: #93bd9d;
+  --map-database: #acabdc;
+  --map-process: #89bbc7;
+  --map-store: #c0a6cc;
+  --map-external: #a7a49c;
+  --map-start: #93bd9d;
+  --map-active: #8bc4be;
+  --map-waiting: #d5ba82;
+  --map-decision: #dba383;
+  --map-success: #93bd9d;
+  --map-failure: #de958e;
+  --semantic-warning: #d5ba82;
+  --semantic-error: #de958e;
+  --semantic-success: #93bd9d;
+  --kind-type: #acabdc;
+  --kind-var: #93bd9d;
+  --section-functions: #89bbc7;
+  --section-data: #d5ba82;
+  --section-constraints: #acabdc;
+  --scrollbar-track: color-mix(in oklab, var(--accent-raw) 10%, transparent);
+  --scrollbar-thumb: color-mix(in oklab, var(--accent-raw) 18%, rgba(233, 232, 226, 0.16));
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--accent-raw) 30%, rgba(233, 232, 226, 0.28));
+  --git-modified: #cfb384;
+  --git-added: #88c19b;
+  --git-deleted: #dc8c7f;
   --gui-canvas: #1e1e1e;
   --gui-canvas-soft: #252526;
   --gui-ink: #e8e8e8;
@@ -219,7 +238,7 @@ html {
 .visual-field:focus-within {
   outline: none;
   border-color: var(--field-border-focus);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--field-border-focus) 35%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--field-border-focus) 35%, transparent);
 }
 
 button:focus-visible,
@@ -248,17 +267,17 @@ select:focus-visible {
   transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
   user-select: text !important;
   -webkit-user-select: text !important;
-  box-shadow: 0 1px 2px rgba(21, 36, 34, 0.04);
+  box-shadow: 0 1px 2px rgba(50, 45, 38, 0.05);
   overflow-wrap: anywhere;
 }
 
 .agent-bubble:hover {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-subtle));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 35%, var(--border-subtle));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 12%, transparent);
 }
 
 .agent-bubble-user {
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface-raised));
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface-raised));
   color: var(--text-primary);
 }
 

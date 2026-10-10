@@ -31,13 +31,29 @@ function isCollapsed(index: number): boolean {
   return Boolean(props.collapsed[index])
 }
 
-function visibleWeight(index: number): number {
-  if (isCollapsed(index)) return 0
-  return props.widths[index] ?? 0
-}
-
 function totalWeight(widths: number[]): number {
   return widths.reduce((sum, w, idx) => sum + (isCollapsed(idx) ? 0 : w), 0)
+}
+
+/** Flex grow share among visible columns (collapsed columns are not mounted). */
+function flexGrow(index: number): number {
+  const total = totalWeight(props.widths)
+  if (total <= 0) return 1
+  return (props.widths[index] ?? 0) / total
+}
+
+function showGutterAfter(leftIndex: number): boolean {
+  const rightIndex = leftIndex + 1
+  if (rightIndex >= count.value) return false
+  return !isCollapsed(leftIndex) && !isCollapsed(rightIndex)
+}
+
+function visibleGutterCount(): number {
+  let n = 0
+  for (let i = 0; i < count.value - 1; i++) {
+    if (showGutterAfter(i)) n++
+  }
+  return n
 }
 
 function gutterWidthPx(): number {
@@ -50,7 +66,7 @@ function gutterWidthPx(): number {
 function availableWidth(): number {
   const el = container.value
   if (!el) return 0
-  const gutters = Math.max(0, count.value - 1) * gutterWidthPx()
+  const gutters = visibleGutterCount() * gutterWidthPx()
   return Math.max(0, el.getBoundingClientRect().width - gutters)
 }
 
@@ -71,6 +87,7 @@ function applyDelta(clientX: number): void {
 
 function onPointerDown(index: number, e: PointerEvent): void {
   if (e.button !== 0 || !container.value) return
+  if (isCollapsed(index) || isCollapsed(index + 1)) return
   e.preventDefault()
   e.stopPropagation()
 
@@ -115,17 +132,14 @@ onUnmounted(() => {
   <div ref="container" class="flex h-full min-h-0 w-full min-w-0">
     <template v-for="i in count" :key="i">
       <div
+        v-show="!isCollapsed(i - 1)"
         class="relative min-h-0 min-w-0 overflow-hidden"
-        :style="
-          isCollapsed(i - 1)
-            ? { flex: '0 0 0px', width: '0px', minWidth: '0px' }
-            : { flex: `${visibleWeight(i - 1)} 0 0px`, minWidth: '0px' }
-        "
+        :style="{ flex: `${flexGrow(i - 1)} 1 0%`, minWidth: '0px' }"
       >
         <slot :name="`col-${i - 1}`" />
       </div>
       <div
-        v-if="i < count"
+        v-if="i < count && showGutterAfter(i - 1)"
         data-resize-gutter
         class="group/resize relative z-20 flex w-3 shrink-0 touch-none items-center justify-center"
       >

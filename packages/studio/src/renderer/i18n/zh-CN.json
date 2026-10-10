@@ -886,7 +886,7 @@
   "settings.accentRed": "红",
   "settings.accentPink": "粉",
   "settings.accentCustom": "自定义",
-  "settings.customHex": "#2563eb",
+  "settings.customHex": "#00668b",
   "settings.transparency": "透明度",
   "settings.transparencyHint": "越低主题色越明显，默认 50%。",
   "settings.workspaceLayoutPresets": "工作区布局",

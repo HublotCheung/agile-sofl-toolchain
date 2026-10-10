@@ -36,9 +36,9 @@ const draggingId = ref<string | null>(null)
 const dropHint = ref<{ section: SectionType; afterId?: string } | null>(null)
 
 const columns: Array<{ type: SectionType; tone: string; bar: string }> = [
-  { type: 'functions', tone: 'text-sky-700 dark:text-sky-300', bar: 'bg-sky-500' },
-  { type: 'data-resources', tone: 'text-amber-700 dark:text-amber-300', bar: 'bg-amber-500' },
-  { type: 'constraints', tone: 'text-violet-700 dark:text-violet-300', bar: 'bg-violet-500' }
+  { type: 'functions', tone: 'text-section-functions', bar: 'bg-section-functions' },
+  { type: 'data-resources', tone: 'text-section-data', bar: 'bg-section-data' },
+  { type: 'constraints', tone: 'text-section-constraints', bar: 'bg-section-constraints' }
 ]
 
 const selectedNode = computed(() => (selected.value ? findNode(selected.value) : null))

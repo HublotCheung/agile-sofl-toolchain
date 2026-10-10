@@ -1,9 +1,10 @@
 "use strict";
-const electron = require("electron");
+const editorApi = require("@agile-sofl/editor-api");
 const node_fs = require("node:fs");
 const node_path = require("node:path");
+const parser = require("@agile-sofl/parser");
+const electron = require("electron");
 const promises = require("node:fs/promises");
-const editorApi = require("@agile-sofl/editor-api");
 const gui = require("@agile-sofl/gui");
 const node_crypto = require("node:crypto");
 const node_url = require("node:url");
@@ -11,6 +12,307 @@ const initSqlJs = require("sql.js");
 const node_module = require("node:module");
 const node_child_process = require("node:child_process");
 const node_util = require("node:util");
+const WRITE_FIELDS = ["toText", "fsf", "pre", "post", "newText", "text"];
+function repairAsflSurface(input) {
+  const parts = splitProtected(input);
+  const notes = [];
+  let unresolved = null;
+  const text = parts.map((part) => {
+    if (!part.code) return part.text;
+    const repaired = repairCode(part.text);
+    notes.push(...repaired.notes);
+    if (repaired.unresolved) unresolved = repaired.unresolved;
+    return repaired.text;
+  }).join("");
+  return { text, notes: [...new Set(notes)], unresolved };
+}
+function normalizeHybridPatch(patch) {
+  const notes = [];
+  const unresolved = [];
+  const operations = (patch.operations ?? []).map((op) => {
+    const next = { ...op };
+    for (const field of WRITE_FIELDS) {
+      const value = next[field];
+      if (typeof value !== "string" || !value) continue;
+      const repaired = repairAsflSurface(value);
+      next[field] = repaired.text;
+      notes.push(...repaired.notes);
+      if (repaired.unresolved) unresolved.push(`${field}: ${repaired.unresolved}`);
+    }
+    return next;
+  });
+  const unique = [...new Set(notes)];
+  const explanation = unique.length ? [patch.explanation, `Auto-repaired illegal ASFL: ${unique.join("; ")}.`].filter((part) => part && String(part).trim()).join("\n") : patch.explanation;
+  return {
+    patch: { ...patch, operations, explanation },
+    notes: unique,
+    unresolved: unresolved.length ? unresolved.join("; ") : null
+  };
+}
+function repairCode(code) {
+  const notes = [];
+  let text = code;
+  if (text.includes("!=")) {
+    text = text.replace(/!=/g, "<>");
+    notes.push("rewrote != to <>");
+  }
+  if (text.includes("'")) {
+    const stripped = text.replace(/'/g, "");
+    if (stripped !== text) {
+      text = stripped;
+      notes.push("dropped VDM post-state prime (')");
+    }
+  }
+  let guard = 0;
+  let carets = 0;
+  while (text.includes("^") && guard++ < 40) {
+    const hat = text.indexOf("^");
+    const left = readPrimaryBackward(text, hat - 1);
+    const right = readPrimaryForward(text, hat + 1);
+    if (!left || !right) {
+      return {
+        text,
+        notes,
+        unresolved: "could not rewrite ^; use conc(seq, elem)"
+      };
+    }
+    const ltxt = text.slice(left.start, left.end).trim();
+    const rtxt = text.slice(right.start, right.end).trim();
+    text = `${text.slice(0, left.start)}conc(${ltxt}, ${rtxt})${text.slice(right.end)}`;
+    carets += 1;
+  }
+  if (text.includes("^")) {
+    return { text, notes, unresolved: "could not rewrite ^; use conc(seq, elem)" };
+  }
+  if (carets) notes.push("rewrote ^ to conc(seq, elem)");
+  return { text, notes, unresolved: null };
+}
+function splitProtected(input) {
+  const parts = [];
+  let i = 0;
+  let buf = "";
+  const flush = (code, text) => {
+    if (buf) {
+      parts.push({ text: buf, code: true });
+      buf = "";
+    }
+    if (text) parts.push({ text, code: false });
+  };
+  while (i < input.length) {
+    if (input.startsWith("//", i) || input.startsWith("--", i)) {
+      const nl = input.indexOf("\n", i);
+      const end = nl < 0 ? input.length : nl;
+      flush(false, input.slice(i, end));
+      i = end;
+      continue;
+    }
+    if (input.startsWith("/*", i)) {
+      const end = input.indexOf("*/", i + 2);
+      const to = end < 0 ? input.length : end + 2;
+      flush(false, input.slice(i, to));
+      i = to;
+      continue;
+    }
+    if (input[i] === '"') {
+      let j = i + 1;
+      while (j < input.length) {
+        if (input[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (input[j] === '"') {
+          j += 1;
+          break;
+        }
+        j += 1;
+      }
+      flush(false, input.slice(i, j));
+      i = j;
+      continue;
+    }
+    if (input[i] === "'" && charLiteralLength(input, i) > 0) {
+      const len = charLiteralLength(input, i);
+      flush(false, input.slice(i, i + len));
+      i += len;
+      continue;
+    }
+    buf += input[i];
+    i += 1;
+  }
+  if (buf) parts.push({ text: buf, code: true });
+  return parts;
+}
+function charLiteralLength(input, i) {
+  if (input[i] !== "'") return 0;
+  if (input[i + 1] === "\\" && input[i + 2] && input[i + 3] === "'") return 4;
+  if (input[i + 1] && input[i + 1] !== "'" && input[i + 1] !== "\\" && input[i + 2] === "'") return 3;
+  return 0;
+}
+function matchForward(s, open) {
+  const closer = s[open] === "(" ? ")" : s[open] === "[" ? "]" : s[open] === "{" ? "}" : "";
+  if (!closer) return -1;
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === s[open]) depth += 1;
+    else if (s[i] === closer) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+function matchBack(s, close) {
+  const opener = s[close] === ")" ? "(" : s[close] === "]" ? "[" : s[close] === "}" ? "{" : "";
+  if (!opener) return -1;
+  let depth = 0;
+  for (let i = close; i >= 0; i--) {
+    if (s[i] === s[close]) depth += 1;
+    else if (s[i] === opener) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+function readPrimaryBackward(s, from) {
+  let i = from;
+  while (i >= 0 && /\s/.test(s[i])) i -= 1;
+  if (i < 0) return null;
+  const end = i + 1;
+  const c = s[i];
+  if (c === ")" || c === "]" || c === "}") {
+    const open = matchBack(s, i);
+    if (open < 0) return null;
+    let start = open;
+    if (c === ")") {
+      let j = open - 1;
+      while (j >= 0 && /\s/.test(s[j])) j -= 1;
+      const idEnd = j;
+      while (j >= 0 && /[A-Za-z0-9_\u0080-\uFFFF]/.test(s[j])) j -= 1;
+      if (idEnd >= 0 && j < idEnd && /[A-Za-z_\u0080-\uFFFF]/.test(s[j + 1])) start = j + 1;
+    }
+    return { start, end };
+  }
+  if (/[A-Za-z0-9_\u0080-\uFFFF.]/.test(c)) {
+    while (i >= 0 && /[A-Za-z0-9_\u0080-\uFFFF.]/.test(s[i])) i -= 1;
+    return { start: i + 1, end };
+  }
+  return null;
+}
+function readPrimaryForward(s, from) {
+  let i = from;
+  while (i < s.length && /\s/.test(s[i])) i += 1;
+  if (i >= s.length) return null;
+  const start = i;
+  const c = s[i];
+  if (c === "(" || c === "[" || c === "{") {
+    const close = matchForward(s, i);
+    if (close < 0) return null;
+    return { start, end: close + 1 };
+  }
+  if (/[A-Za-z_\u0080-\uFFFF]/.test(c)) {
+    i += 1;
+    while (i < s.length && /[A-Za-z0-9_\u0080-\uFFFF]/.test(s[i])) i += 1;
+    let j = i;
+    while (j < s.length && /\s/.test(s[j])) j += 1;
+    if (s[j] === "(") {
+      const close = matchForward(s, j);
+      if (close >= 0) return { start, end: close + 1 };
+    }
+    return { start, end: i };
+  }
+  if (/[0-9]/.test(c)) {
+    i += 1;
+    while (i < s.length && /[0-9.]/.test(s[i])) i += 1;
+    return { start, end: i };
+  }
+  return null;
+}
+function getExperimentConfig(projectRoot, env = process.env) {
+  let file = {};
+  if (projectRoot) {
+    const p = node_path.join(projectRoot, ".agile-sofl", "experiment.json");
+    try {
+      if (node_fs.existsSync(p)) file = JSON.parse(node_fs.readFileSync(p, "utf-8"));
+    } catch {
+    }
+  }
+  const condition = String(env.AGILE_SOFL_CONDITION || file.condition || "T").trim().toUpperCase() || "T";
+  const participantId = String(env.AGILE_SOFL_PARTICIPANT || file.participantId || "anonymous").trim();
+  const telemetry = env.AGILE_SOFL_TELEMETRY !== void 0 ? env.AGILE_SOFL_TELEMETRY !== "0" : file.telemetry !== false;
+  const logPrompts = env.AGILE_SOFL_LOG_PROMPTS !== void 0 ? env.AGILE_SOFL_LOG_PROMPTS === "1" : file.logPrompts === true;
+  return { condition, participantId, semanticChecks: condition.toUpperCase() !== "B2", telemetry, logPrompts };
+}
+const isL1Code = (code) => /^ASFL_FSF_1\d\d$/.test(code);
+const isL2Code = (code) => /^ASFL_FSF_2\d\d$/.test(code);
+const count = (ds) => ({
+  error: ds.filter((d) => d.severity === "error").length,
+  warning: ds.filter((d) => d.severity === "warning").length
+});
+async function semanticDiagnostics(asfl, cfg) {
+  if (!cfg.semanticChecks || !asfl.trim()) return [];
+  const r = parser.check(asfl, { fsfL1: false });
+  if (!r.ast) return [];
+  return [...parser.checkFsfL1(r.ast).diagnostics, ...(await parser.checkFsfL2(r.ast)).diagnostics];
+}
+async function diagnosticCounts(asfl, cfg) {
+  const r = parser.check(asfl, { fsfL1: false });
+  const parser$1 = count(r.diagnostics.filter((d) => !isL1Code(d.code) && !isL2Code(d.code)));
+  if (!cfg.semanticChecks || !r.ast) {
+    return { parser: parser$1, l1: { error: 0, warning: 0, enabled: cfg.semanticChecks, ran: false }, l2: { error: 0, warning: 0, enabled: cfg.semanticChecks, ran: false } };
+  }
+  const l1 = count(parser.checkFsfL1(r.ast).diagnostics);
+  const l2 = count((await parser.checkFsfL2(r.ast)).diagnostics);
+  return { parser: parser$1, l1: { ...l1, enabled: true, ran: true }, l2: { ...l2, enabled: true, ran: true } };
+}
+function telemetryPath(projectRoot) {
+  return node_path.join(projectRoot, ".agile-sofl", "llm-calls.jsonl");
+}
+const SECRET_KEYS = /^(api[-_]?key|authorization|token|secret|password)$/i;
+function scrub(v) {
+  if (Array.isArray(v)) return v.map(scrub);
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) o[k] = SECRET_KEYS.test(k) ? "[redacted]" : scrub(x);
+    return o;
+  }
+  if (typeof v === "string") return v.replace(/\b(sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)/g, "[redacted]");
+  return v;
+}
+function logTelemetry(projectRoot, cfg, sessionId, ev) {
+  if (!projectRoot || !cfg.telemetry) return;
+  const rec = {
+    ts: (/* @__PURE__ */ new Date()).toISOString(),
+    sessionId,
+    participantId: cfg.participantId,
+    condition: cfg.condition,
+    ...ev
+  };
+  if (!cfg.logPrompts) delete rec.prompt;
+  try {
+    node_fs.mkdirSync(node_path.join(projectRoot, ".agile-sofl"), { recursive: true });
+    node_fs.appendFileSync(telemetryPath(projectRoot), JSON.stringify(scrub(rec)) + "\n", "utf-8");
+  } catch {
+  }
+}
+const KNOWN_CONDITIONS = ["T", "B2"];
+function conditionNotice(cfg) {
+  const mode = cfg.semanticChecks ? "full tool: agent + parser + L1 + L2" : "agent + parser feedback only; L1/L2 disabled";
+  let msg = `[agile-sofl experiment] active condition=${cfg.condition} (${mode}), participant=${cfg.participantId}`;
+  if (cfg.condition === "B0" || cfg.condition === "B1") msg += ` — WARNING: ${cfg.condition} is an external baseline not implemented in the studio; running as T`;
+  else if (!KNOWN_CONDITIONS.includes(cfg.condition)) msg += ` — WARNING: unknown condition label; running as T`;
+  return msg;
+}
+const announced = /* @__PURE__ */ new Set();
+function announceCondition(projectRoot, sessionId, cfg = getExperimentConfig(projectRoot)) {
+  const msg = conditionNotice(cfg);
+  const key = `${projectRoot ?? ""}\0${sessionId}`;
+  if (announced.has(key)) return msg;
+  announced.add(key);
+  console.warn(msg);
+  logTelemetry(projectRoot, cfg, sessionId, { event: "session_start", semanticChecks: cfg.semanticChecks, warning: msg });
+  return msg;
+}
 let cached = {};
 let loaded = false;
 function statePath() {
@@ -38,6 +340,34 @@ async function rememberDialogPath(filePath) {
   } catch {
   }
 }
+function moduleArtifactDir(filePath) {
+  return node_path.join(node_path.dirname(filePath), ".agile-sofl", "modules", node_path.basename(filePath, node_path.extname(filePath)));
+}
+function writeModuleArtifacts(filePath, content) {
+  if (node_path.extname(filePath).toLowerCase() !== ".asfl") return { written: [], skipped: "not an .asfl file" };
+  let ast;
+  try {
+    ast = parser.parse(content).ast;
+  } catch (e) {
+    return { written: [], skipped: `parse failed: ${String(e)}` };
+  }
+  if (!ast || ast.type !== "program" || ast.modules.length === 0) return { written: [], skipped: "no parsable modules" };
+  const dir = moduleArtifactDir(filePath);
+  node_fs.mkdirSync(dir, { recursive: true });
+  const written = [];
+  const keep = /* @__PURE__ */ new Set();
+  for (const a of parser.moduleArtifacts(ast, content)) {
+    const safe = a.moduleName.replace(/[^A-Za-z0-9_.-]/g, "_");
+    const txt = node_path.join(dir, `${safe}.asfl`);
+    const xml = node_path.join(dir, `${safe}.xml`);
+    node_fs.writeFileSync(txt, a.text, "utf-8");
+    node_fs.writeFileSync(xml, a.xml, "utf-8");
+    written.push(txt, xml);
+    keep.add(`${safe}.asfl`).add(`${safe}.xml`);
+  }
+  for (const f of node_fs.readdirSync(dir)) if (/\.(asfl|xml)$/.test(f) && !keep.has(f)) node_fs.unlinkSync(node_path.join(dir, f));
+  return { written };
+}
 function registerFileHandlers(getWindow2) {
   electron.ipcMain.handle("studio:file-read", async (_event, filePath) => {
     const content = await promises.readFile(filePath, "utf-8");
@@ -45,7 +375,13 @@ function registerFileHandlers(getWindow2) {
   });
   electron.ipcMain.handle("studio:file-write", async (_event, filePath, content) => {
     await promises.writeFile(filePath, content, "utf-8");
-    return { filePath, title: node_path.basename(filePath) };
+    let dualSave;
+    try {
+      dualSave = writeModuleArtifacts(filePath, content);
+    } catch (e) {
+      dualSave = { written: [], skipped: String(e) };
+    }
+    return { filePath, title: node_path.basename(filePath), dualSave };
   });
   electron.ipcMain.handle("studio:file-open-dialog", async (_event, kind) => {
     const win = getWindow2();
@@ -392,15 +728,15 @@ async function pingModels(cfg) {
   if (!res.ok) {
     return { ok: false, message: `HTTP ${res.status}`, ms, detail: text.slice(0, 240) };
   }
-  let count;
+  let count2;
   try {
     const json = JSON.parse(text);
-    if (Array.isArray(json.data)) count = json.data.length;
+    if (Array.isArray(json.data)) count2 = json.data.length;
   } catch {
   }
   return {
     ok: true,
-    message: count != null ? `OK · ${count} models` : `OK · HTTP ${res.status}`,
+    message: count2 != null ? `OK · ${count2} models` : `OK · HTTP ${res.status}`,
     ms
   };
 }
@@ -510,15 +846,24 @@ async function postChat(body, userSignal) {
   }
   return res;
 }
-async function chatEcnuStream(options) {
+function reasoningEffortFor(thinking) {
+  return thinking === false ? "off" : "low";
+}
+function buildStreamBody(options) {
   const body = {
     messages: options.messages,
     temperature: options.temperature ?? 0.35,
     stream: true,
     thinking: { type: options.thinking === false ? "disabled" : "enabled" }
   };
-  if (options.thinking !== false) body.reasoning_effort = "low";
+  const effort = reasoningEffortFor(options.thinking);
+  if (effort !== "off") body.reasoning_effort = effort;
   if (options.tools?.length) body.tools = options.tools;
+  body.stream_options = { include_usage: true };
+  return body;
+}
+async function chatEcnuStream(options) {
+  const body = buildStreamBody(options);
   const res = await postChat(body, options.signal);
   if (!res.body) throw new Error("ChatECNU stream has no body.");
   const reader = res.body.getReader();
@@ -528,6 +873,8 @@ async function chatEcnuStream(options) {
   let reasoning = "";
   const tools = [];
   let finishReason = "stop";
+  let usage = { promptTokens: null, completionTokens: null };
+  let model;
   const flushLine = (line) => {
     const trimmed = line.trim();
     if (!trimmed.startsWith("data:")) return;
@@ -539,6 +886,8 @@ async function chatEcnuStream(options) {
     } catch {
       return;
     }
+    if (parsed.usage) usage = { promptTokens: parsed.usage.prompt_tokens ?? null, completionTokens: parsed.usage.completion_tokens ?? null };
+    if (parsed.model) model = parsed.model;
     const choice = parsed.choices?.[0];
     if (!choice) return;
     if (choice.finish_reason) finishReason = choice.finish_reason;
@@ -609,7 +958,9 @@ async function chatEcnuStream(options) {
       type: "function",
       function: { name: t.name, arguments: t.arguments || "{}" }
     })),
-    finishReason
+    finishReason,
+    usage,
+    model: model ?? getEcnuConfig().model
   };
 }
 function hasEcnuKey() {
@@ -653,17 +1004,17 @@ const AGENT_SKILLS = [
 Agile-SOFL architecture:
 - Exactly one top-level SYSTEM_ module named after the whole system (e.g. SYSTEM_FoodDelivery). It is the system module; other modules are children (module Auth / FoodDelivery;).
 - Add SYSTEM_ first (it is inserted at the file start). Then add semantic modules with parentId=mod:SYSTEM_…. A GUI_ module is a child, not the system module.
-- Process signatures default to () when ports are unknown. Never invent dummy (x: nat) ok: nat. Write real inputs/outputs when they exist. Invariants use implies or =>.
+- Process signatures default to () when ports are unknown. Never invent dummy (x: nat) ok: nat. Write real inputs/outputs when they exist. There is no implication operator; write not A or B.
 Pipeline — keep going after each applied patch until every enabled stage is done, then summarize:
 1. Read Informal and Hybrid inventories. If Hybrid already exists and strategy is ask, call ask_clarification (merge vs rebuild).
 2. Module architecture: add the SYSTEM_ module, then each semantic module (and a GUI module) with propose_hybrid_changes op=add kind=module. Do not paste module source.
 3. Per module: add types/variables from Data Resources (kind=type|var, parentId=mod:…).
-4. Per module: add process signatures from Functions (kind=process, pre/post).
-5. Per process: replace-process-body or add scenarios. Write structured natural-language pre/post, never FSF :. Enumerations use {<Tag>}.
+4. Per module: add process signatures from Functions (kind=process).
+5. Per process: replace-process-body or add scenarios. Write the FSF (FSF : T1 && D1 || T2 && D2 || … || others && Dn); Ti/Di may be structured natural language at this stage. Enumerations use {<Tag>}.
 6. Add invariants (kind=inv) from Constraints. Do NOT dump GUI widgets into Hybrid CRUD.
 7. For UI, call read_gui_specification then propose_gui_changes. Each screen is its own HTML page (data-screen) with data-nav to sibling screens so the prototype can click-switch. Build a high-fidelity HTML prototype (shell, sidebar, hero, cards, forms, lists, empty states) — not a page of three buttons. Use whitelist tags plus any as-* class. Bind with data-process / data-bind / data-nav. Prefer replace-screen-html with the full inner layout of that one screen. Hybrid gui blocks stay as slim screen→process traces.
 After every applied write, call read_hybrid_specification / read_gui_specification and fix gaps until inventories are correct.
-8. Dual-line refinement is a later stage, not automatic. After enabled Hybrid/GUI stages finish, call read_refinement_state. If unambiguous=false, ask_clarification with 2–4 next slices (empty module, stub process, FormalizePredicate, data retrieve). Do not refine the entire tree in one go. Do not claim the specification has no ambiguity while empty modules, stubs, processAmbiguity, or dataAmbiguity remain.
+8. Three-line refinement is a later stage, not automatic. After enabled Hybrid/GUI stages finish, call read_refinement_state. If unambiguous=false, ask_clarification with 2–4 next slices (empty module, stub process, FormalizePredicate, data retrieve, operational grain). Do not refine the entire tree in one go. Do not claim the specification has no ambiguity while empty modules, stubs, processAmbiguity, dataAmbiguity, or grainAmbiguity remain. Grain questions may only use variations already listed in the digest.
 Last message = summary of completed generation stages plus remaining refinement gaps.
 If CRUD fails, the file is empty/out of sync, diagnostics list syntax errors, or leftover unparsed text appears, call read_hybrid_specification with view=source then propose_source_edit (unique replace/append/replace-document). Do not retry the same failing CRUD. Prefer CRUD; source edit is last resort.
 Infer unstated GUI/navigation only when the parameter allows it; otherwise ask. Prefer small patches citing inventory ids.`
@@ -671,17 +1022,18 @@ Infer unstated GUI/navigation only when the parameter allows it; otherwise ask. 
   {
     id: "hybrid-refinement",
     name: "Hybrid Refinement",
-    prompt: `You are refining an existing Hybrid (.asfl) specification along Liu's dual-line SOFL process: process atomicity and data refinement. Do not dump a full file.
+    prompt: `You are refining an existing Hybrid (.asfl) specification along three lines: process atomicity, data refinement, and operational grain. Do not dump a full file. Formal pre/post does not make a process one operation.
 Completeness is not "whatever happens to be written". A module that is only a name (no types/vars/processes/cdfd) is an empty shell — a gap. A process that is only a name (no pre/post/fsf/decom) is a stub — also a gap.
 Guide the user one slice at a time. Do not silently refine every node.
 Pipeline:
 1. read_refinement_state (tree or summary) plus Informal/Hybrid inventories. Identify the named module/process/data item from the user message, or ask_clarification if several slices are open.
-2. Prefer propose_refinement_step: FormalizePredicate, DecomposeProcess, SetCdfd, DeclareAtomic, IntroduceRetrieve, DischargeDataObligation, DefineType.
+2. Prefer propose_refinement_step: FormalizePredicate, DecomposeProcess, SetCdfd, DeclareAtomic, IntroduceRetrieve, DischargeDataObligation, DefineType, ClassifyGrain, ResolveVariation.
+   Grain: read the digest. ask_clarification only about variations already extracted (and name-claim). Then ClassifyGrain (grainClass=operation|abstract) or ResolveVariation (variationId, disposition=scenario|child|waived, toText=child process name, note required when waived). Do not invent a CRUD catalog. Do not clear grainAmbiguity by rewriting pre/post; that counter drops only after those steps or DecomposeProcess. DeclareAtomic requires operational grain to be closed.
 3. Use propose_hybrid_changes for new types/vars/processes/scenarios when the shell is empty. Never treat missing members as done.
 4. If CRUD/refinement-step cannot express the fix, read_hybrid_specification view=source then propose_source_edit (replace/append). Informal atoms still need a FormalizePredicate step afterwards or ambiguity will not drop.
 5. CDFD is optional on old files; write one only when the user asks to draft/complete a diagram or a process must appear on the current module graph.
 6. After each applied write, read_refinement_state. Stay on the chosen slice until that local gap shrinks. Then if more gaps remain, ask_clarification for the next slice — do not claim an unambiguous spec while the digest says unambiguous=false.
-Last message = what ambiguity dropped (process vs data) and what remains.`
+Last message = what ambiguity dropped (process vs data vs grain) and what remains.`
   }
 ];
 function skillById(id) {
@@ -692,7 +1044,7 @@ const AGENT_TOOLS = [
     type: "function",
     function: {
       name: "ask_clarification",
-      description: "Ask the user a structured clarification question. The UI will render options the user can click, plus optional custom input. Use this instead of listing questions only in prose when a decision is needed.",
+      description: "Ask the user a structured clarification question. The UI renders options plus a custom text field. The tool result has selected (clicked options) and custom (text the user typed). A non-empty custom answer is required context for both single-choice and multi-choice, even when selected is also set. Never ignore custom. Use this instead of listing questions only in prose when a decision is needed.",
       parameters: {
         type: "object",
         properties: {
@@ -842,7 +1194,7 @@ const AGENT_TOOLS = [
     type: "function",
     function: {
       name: "propose_hybrid_changes",
-      description: "Propose an incremental Hybrid/.asfl CRUD patch against inventory ids (mod:, proc:Module.Name). Prefer this over source edits. SYSTEM_ is the unique top-level system module (named after the whole system) and is inserted first; other modules use parentId=mod:SYSTEM_…. Default process signature is (). Never emit raw SOFL or replace-document here. Use add/update/remove/replace-process-body. Write pre/post, not FSF :. Invariants may use implies or =>.",
+      description: "Propose an incremental Hybrid/.asfl CRUD patch against inventory ids (mod:, proc:Module.Name). Prefer this over source edits. SYSTEM_ is the unique top-level system module (named after the whole system) and is inserted first; other modules use parentId=mod:SYSTEM_…. Default process signature is (). Never emit raw SOFL or replace-document here. Use add/update/remove/replace-process-body. Write process logic as FSF via replace-process-body.fsf: FSF : T1 && D1 || T2 && D2 || … || others && Dn. There is no implication operator; write not A or B.",
       parameters: {
         type: "object",
         properties: {
@@ -874,6 +1226,7 @@ const AGENT_TOOLS = [
                 parentId: { type: "string", description: "add: parent mod: or proc: id" },
                 name: { type: "string" },
                 text: { type: "string" },
+                fsf: { type: "string", description: 'replace-process-body: final-grammar FSF "FSF : T1 && D1 || T2 && D2 || … || others && Dn"' },
                 pre: { type: "string" },
                 post: { type: "string" },
                 signature: { type: "string" },
@@ -967,7 +1320,7 @@ const AGENT_TOOLS = [
     type: "function",
     function: {
       name: "propose_refinement_step",
-      description: "Submit an auditable Hybrid refinement step. Informal atoms may only become formal via FormalizePredicate. DecomposeProcess creates a child module and an empty CDFD. SetCdfd writes or replaces one module cdfd block (toText). Missing cdfd on an existing module is not an error — do not invent a CDFD unless the user asks to draw or refine the data-flow diagram.",
+      description: "Submit an auditable Hybrid refinement step. Informal atoms may only become formal via FormalizePredicate. Operational grain closes only via ClassifyGrain, ResolveVariation, or DecomposeProcess — rewriting pre/post does not reduce grainAmbiguity. DecomposeProcess creates a child module and an empty CDFD. SetCdfd writes or replaces one module cdfd block (toText). Missing cdfd on an existing module is not an error — do not invent a CDFD unless the user asks to draw or refine the data-flow diagram.",
       parameters: {
         type: "object",
         properties: {
@@ -984,9 +1337,14 @@ const AGENT_TOOLS = [
               "Extend",
               "IntroduceRetrieve",
               "DischargeDataObligation",
-              "SetCdfd"
+              "SetCdfd",
+              "ClassifyGrain",
+              "ResolveVariation"
             ]
           },
+          grainClass: { type: "string", enum: ["operation", "abstract"], description: "ClassifyGrain: operation is one trigger; abstract is still a concern" },
+          variationId: { type: "string", description: "ResolveVariation: id from the grain digest, or name-claim" },
+          disposition: { type: "string", enum: ["scenario", "child", "waived"], description: "ResolveVariation. child requires toText = child process name. waived requires note." },
           moduleName: { type: "string" },
           processName: { type: "string" },
           typeName: { type: "string" },
@@ -1618,12 +1976,87 @@ function informalInventoryFromMarkdown(markdown, maxChars = 12e3) {
   const { specification } = parseInformalSpec(markdown);
   return formatInformalInventory(specification, maxChars);
 }
+function readStructured(result) {
+  try {
+    const parsed = JSON.parse(result);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    if (typeof parsed.action === "string") return null;
+    const hasSelected = Array.isArray(parsed.selected);
+    const hasCustom = typeof parsed.custom === "string";
+    if (!hasSelected && !hasCustom) return null;
+    const selected = hasSelected ? parsed.selected.filter((item) => typeof item === "string").map((item) => item.trim()).filter(Boolean) : [];
+    const custom = hasCustom ? parsed.custom.trim() : "";
+    return { selected, custom };
+  } catch {
+    return null;
+  }
+}
+function formatClarificationToolContent(result, options) {
+  const structured = readStructured(result);
+  let selected;
+  let custom;
+  if (structured) {
+    selected = options?.multiSelect ? structured.selected : structured.selected.slice(0, 1);
+    custom = structured.custom;
+  } else {
+    const labels = new Set(options?.labels ?? []);
+    const parts = result.split(";").map((part) => part.trim()).filter(Boolean);
+    selected = parts.filter((part) => labels.has(part));
+    const customParts = parts.filter((part) => !labels.has(part));
+    if (!options?.multiSelect && selected.length > 1) selected = selected.slice(0, 1);
+    custom = selected.length === 0 ? result.trim() : customParts.join("; ");
+  }
+  const answer = [...selected, custom].filter(Boolean).join("; ");
+  const next = custom ? "custom is text the user typed. You MUST use it even when this question was single-choice (multiSelect false) and even when selected is also non-empty. A clicked option does not replace or cancel custom. Then continue the task." : "Use the selected answer and continue the task. If more work remains, propose the next change or ask_clarification. When the task is done, write a short summary.";
+  return {
+    display: answer || result.trim(),
+    toolContent: JSON.stringify({
+      type: "clarification_answer",
+      selected,
+      custom,
+      answer: answer || result.trim(),
+      next
+    })
+  };
+}
+function clarificationContinuationText(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.type !== "clarification_answer") return null;
+    const custom = typeof parsed.custom === "string" ? parsed.custom.trim() : "";
+    const selected = Array.isArray(parsed.selected) ? parsed.selected.filter((item) => typeof item === "string" && item.trim().length > 0).join("; ") : "";
+    const answer = typeof parsed.answer === "string" ? parsed.answer.trim() : "";
+    if (custom) {
+      return `The user answered a clarification. Selected options: ${selected || "(none)"}. Custom answer, which you MUST follow even if the question was single-choice and even if a selected option is also present: ${custom}. Do not ignore this custom answer. Continue the task with propose_* or another ask_clarification as needed, then summarize when done.`;
+    }
+    return `The user answered a clarification: ${answer || selected || "(empty)"}. Continue the task. Prefer propose_changes / propose_hybrid_changes. When the task is done, write a short summary and stop.`;
+  } catch {
+    return null;
+  }
+}
 function numberedSource(text, maxChars = 16e3) {
   if (!text.trim()) return "(empty file)";
   const body = text.split("\n").map((line, i) => `${String(i + 1).padStart(4, " ")}| ${line}`).join("\n");
   if (body.length <= maxChars) return body;
   return `${body.slice(0, maxChars)}
 …(truncated)`;
+}
+function informalGrainNotes(projectRoot) {
+  if (!projectRoot) return [];
+  let names = [];
+  try {
+    names = node_fs.readdirSync(projectRoot).filter((name) => name.endsWith(".aspec"));
+  } catch {
+    return [];
+  }
+  const notes = [];
+  for (const name of names) {
+    try {
+      notes.push(...parser.authorNotesFromInformalMarkdown(node_fs.readFileSync(node_path.join(projectRoot, name), "utf-8")));
+    } catch {
+    }
+  }
+  return notes;
 }
 function refinementLogPath(projectRoot) {
   return node_path.join(projectRoot, ".agile-sofl", "refinement-log.jsonl");
@@ -1638,7 +2071,7 @@ function readRefinementLog(projectRoot) {
   }
 }
 function projectRefinementState(projectRoot, source) {
-  return editorApi.buildRefinementState(source, readRefinementLog(projectRoot));
+  return editorApi.buildRefinementState(source, readRefinementLog(projectRoot), informalGrainNotes(projectRoot));
 }
 function patchFingerprint(patch) {
   return JSON.stringify({
@@ -1706,14 +2139,35 @@ function validateAgentPatch(target, patch, options) {
   }
   for (const op of patch.operations) {
     const kind = String(op.op || "");
-    if (kind === "refine-step") continue;
+    if (kind === "refine-step") {
+      const stepKind = String(op.kind || "");
+      if (!stepKind) return { ok: false, message: "refine-step requires kind." };
+      if (stepKind === "FormalizePredicate") {
+        if (!String(op.fromText ?? "").trim() || op.toText == null || !String(op.toText).trim()) {
+          return {
+            ok: false,
+            message: "FormalizePredicate requires fromText (the current informal sentence) and toText (legal ASFL)."
+          };
+        }
+      }
+      if (stepKind === "ClassifyGrain") {
+        const grain = String(op.grainClass ?? "");
+        if (!String(op.moduleName ?? "").trim() || !String(op.processName ?? "").trim() || grain !== "operation" && grain !== "abstract") {
+          return {
+            ok: false,
+            message: "ClassifyGrain requires moduleName, processName, and grainClass operation|abstract."
+          };
+        }
+      }
+      continue;
+    }
     if (kind === "replace-document" || typeof op.asflText === "string") {
       return {
         ok: false,
         message: "replace-document / asflText is not allowed on CRUD. Use add/update/remove, or call propose_source_edit for a source-level fix."
       };
     }
-    const blobs = [op.text, op.pre, op.post, op.comment, op.signature];
+    const blobs = [op.text, op.fsf, op.pre, op.post, op.comment, op.signature];
     for (const blob of blobs) {
       if (typeof blob !== "string") continue;
       if (/\b(?:module|system)\b[\s\S]{6,}end_module\b/i.test(blob) || /\bend_module\b/i.test(blob)) {
@@ -1757,30 +2211,34 @@ function crudBlockedByFailures(lastFailed, incoming) {
   if (incoming.mode === "source") return null;
   if (!lastFailed) return null;
   if (lastFailed.fingerprint === incoming.fingerprint) {
-    return "This CRUD patch already failed. Do not retry it. Call read_specification and/or read_hybrid_specification with view=source, then propose_source_edit (replace/append/replace-document).";
-  }
-  if (lastFailed.mode !== "source" && lastFailed.count >= 2) {
-    return "CRUD has failed repeatedly. Call read_* with view=source, then propose_source_edit to unstick. CRUD is blocked until a source edit is applied.";
+    return "This patch already failed. Do not retry it unchanged. Read the error, rewrite the fragment (legal ASFL, a unique fromText) or propose_source_edit, then continue.";
   }
   return null;
 }
 function nextFailedWrite(lastFailed, incoming) {
-  const count = lastFailed ? lastFailed.count + 1 : 1;
+  const count2 = lastFailed ? lastFailed.count + 1 : 1;
   return {
     fingerprint: incoming.fingerprint,
     error: incoming.error,
-    count,
+    count: count2,
     mode: incoming.mode
   };
 }
 function continuationUserText(lastToolContent, failures = 0) {
+  const clarification = clarificationContinuationText(lastToolContent || "");
+  if (clarification) return clarification;
   let action;
   let error;
+  let instruction;
   try {
     const parsed = JSON.parse(lastToolContent || "{}");
     action = parsed.action;
     error = parsed.error;
+    if (parsed.type === "user_instruction") instruction = parsed.text || "";
   } catch {
+  }
+  if (instruction != null) {
+    return `The user wrote this while a proposed change was still unconfirmed: ${instruction}. That change was neither applied nor rejected. Interpret their meaning and act now: re-propose the same change if they want it, propose a revision if they want something different, or leave it if they declined. Then continue the task. Do not stop and do not wait.`;
   }
   const sourceHint = "If CRUD cannot express the fix, call read_* with view=source, then propose_source_edit (replace/append/replace-document). That is allowed.";
   if (action === "applied") {
@@ -1790,7 +2248,7 @@ function continuationUserText(lastToolContent, failures = 0) {
     return "The patch was applied. Immediately call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed). Compare with the plan, and either propose the next incremental CRUD/refinement step or write a final summary. If the refinement digest is not unambiguous, invite the next slice with ask_clarification. Do not wait for a new user message.";
   }
   if (action === "error" || failures >= 2) {
-    return `The write failed: ${error || "unknown error"}. This is a tool result, not a stopped session. Do not retry the same CRUD patch. Call read_specification and/or read_hybrid_specification with view=source, then propose_source_edit to unstick (replace a unique snippet, append, or replace-document). Then verify. Do not stop with an empty message.`;
+    return `The write failed: ${error || "unknown error"}. This is a tool result, not a stopped session. Do not retry the same patch unchanged. Rewrite it (legal ASFL, unique fromText) and re-propose, or call read_specification and/or read_hybrid_specification with view=source, then propose_source_edit to unstick (replace a unique snippet, append, or replace-document). Then verify. Do not stop with an empty message.`;
   }
   if (action === "rejected") {
     return "The user rejected that patch. Adjust: ask_clarification if needed, propose a smaller CRUD patch, or use propose_source_edit if the file itself is stuck. Do not stop with an empty message.";
@@ -1798,11 +2256,27 @@ function continuationUserText(lastToolContent, failures = 0) {
   return "Continue now. Prefer propose_changes / propose_hybrid_changes. If those fail, read source and propose_source_edit. After writes, read the spec to verify. When the task is done, write a short summary and stop. Do not reply with an empty message.";
 }
 function appliedToolResult(extra) {
+  const notes = [
+    extra?.repair ? `Auto-repair kept the write legal: ${extra.repair}.` : "",
+    extra?.userNote ? `The user also said: ${extra.userNote}. Follow that after verifying.` : ""
+  ].filter(Boolean);
+  const next = extra?.error ? `Some operations failed: ${extra.error}. Read the inventory (and view=source if needed). Follow up with a corrected CRUD or propose_source_edit. Do not stop.` : "Call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed) to verify. If syntax errors remain, fix them before the next step. If more work remains, propose the next CRUD or propose_refinement_step (or propose_source_edit if CRUD cannot express it). If Hybrid still has dual-line gaps, ask_clarification for the next slice. If the task is complete, write a short summary and stop.";
   return JSON.stringify({
     action: "applied",
     ok: !extra?.error,
     error: extra?.error,
-    next: extra?.error ? `Some operations failed: ${extra.error}. Read the inventory (and view=source if needed). Follow up with CRUD or propose_source_edit. Do not stop.` : "Call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed) to verify. If more work remains, propose the next CRUD or propose_refinement_step (or propose_source_edit if CRUD cannot express it). If Hybrid still has dual-line gaps, ask_clarification for the next slice. If the task is complete, write a short summary and stop."
+    repair: extra?.repair,
+    userNote: extra?.userNote,
+    next: [next, ...notes].join(" ")
+  });
+}
+function userInstructionToolResult(text) {
+  return JSON.stringify({
+    type: "user_instruction",
+    applied: false,
+    rejected: false,
+    text,
+    next: "The user wrote this while your proposed change was still unconfirmed. It was neither applied nor rejected. Interpret their meaning: re-propose the same change if they want it, propose a revision if they want something else, or drop it if they declined. Then continue the task. Do not stop."
   });
 }
 function rejectedToolResult() {
@@ -1815,12 +2289,16 @@ function rejectedToolResult() {
 function assistantTurnIsComplete(content, toolCallCount) {
   return content.trim().length > 0;
 }
-function failedToolResult(error) {
+function failedToolResult(error, userNote) {
   return JSON.stringify({
     action: "error",
     ok: false,
     error,
-    next: "Tool failed. Do not retry the identical CRUD. Read inventory and view=source, then propose_source_edit if needed. Do not stop the task."
+    userNote: userNote || void 0,
+    next: [
+      "Tool failed. Do not retry the identical patch. Read the error, rewrite the fragment, and re-propose. If CRUD cannot express the fix, read inventory and view=source, then propose_source_edit. Do not stop the task.",
+      userNote ? `The user also said: ${userNote}` : ""
+    ].filter(Boolean).join(" ")
   });
 }
 const MAX_HISTORY = 20;
@@ -1869,6 +2347,31 @@ function hybridDiagnosticsPayload(asfl) {
     items
   };
 }
+async function hybridDiagnosticsWithSemantic(asfl, cfg) {
+  const base = hybridDiagnosticsPayload(asfl);
+  let semantic = [];
+  try {
+    semantic = await semanticDiagnostics(asfl ?? "", cfg);
+  } catch {
+  }
+  const items = [
+    ...base.items,
+    ...semantic.map((d) => ({
+      severity: d.severity,
+      code: d.code,
+      source: /^ASFL_FSF_1/.test(d.code) ? "L1" : "L2",
+      line: d.span.line,
+      column: d.span.column,
+      message: d.message
+    }))
+  ];
+  return {
+    count: items.length,
+    errors: items.filter((d) => d.severity === "error").length,
+    items,
+    semanticChecks: cfg.semanticChecks
+  };
+}
 function numberedHybridSource(asfl) {
   const source = numberedSource(asfl ?? "");
   const report = editorApi.formatHybridDiagnostics(asfl ?? "");
@@ -1879,7 +2382,9 @@ ${report}`;
 }
 function systemPrompt(ctx, permissions) {
   const skill = skillById(ctx.skillId);
-  const toolLines = ["- ask_clarification: when you need a decision (render options the user can click)"];
+  const toolLines = [
+    "- ask_clarification: when you need a decision (options the user can click, plus their own typed answer)"
+  ];
   if (permissions.informal.read) {
     toolLines.push("- read_specification: Informal inventory (default) or numbered source (view=source)");
     toolLines.push("- review_specification: Informal quality review");
@@ -1898,7 +2403,7 @@ function systemPrompt(ctx, permissions) {
   if (permissions.hybrid.write) {
     toolLines.push("- propose_hybrid_changes: incremental Hybrid CRUD (preferred)");
     toolLines.push(
-      "- propose_refinement_step: FormalizePredicate / DecomposeProcess / SetCdfd / DeclareAtomic / IntroduceRetrieve / DischargeDataObligation. A module without cdfd is valid; do not treat ASFL_CDFD_001 as a syntax error."
+      "- propose_refinement_step: FormalizePredicate / DecomposeProcess / SetCdfd / DeclareAtomic / IntroduceRetrieve / DischargeDataObligation / ClassifyGrain / ResolveVariation. A module without cdfd is valid; do not treat ASFL_CDFD_001 as a syntax error. Grain ambiguity does not drop if you only rewrite pre/post."
     );
   }
   if (permissions.hybrid.write || permissions.informal.write) {
@@ -1917,14 +2422,14 @@ function systemPrompt(ctx, permissions) {
 Prefer update/remove on existing nodes over adding a second copy of the same idea.
 Do not invent YAML frontmatter or document-level metadata.` : "You do not have Informal write permission. Do not call propose_changes.";
   const hybridGuide = permissions.hybrid.write ? `For propose_hybrid_changes, operate on Hybrid inventory ids with CRUD only:
-- add: kind (module|type|var|const|inv|process|function|scenario|gui-screen) + parentId (mod:Module or proc:Module.Name) + name. Bare ids like proc:Login or Chinese titles are resolved when possible, but prefer inventory ids. Types/vars/invs use text. Processes use pre/post/signature — NEVER FSF :. If ports are unknown, signature is () — do not invent dummy (x: nat) ok: nat.
+- add: kind (module|type|var|const|inv|process|function|scenario|gui-screen) + parentId (mod:Module or proc:Module.Name) + name. Bare ids like proc:Login or Chinese titles are resolved when possible, but prefer inventory ids. Types/vars/invs use text. Processes use signature + FSF (final grammar): FSF : T1 && D1 || T2 && D2 || … || others && Dn (Ti = test condition over inputs and ~x initial values, never outputs; Di = defining condition that constrains outputs / written ext vars). Inside Ti/Di use and, or, not; && and || only separate scenarios. If ports are unknown, signature is () — do not invent dummy (x: nat) ok: nat.
 - update / remove: id of existing entity (mod:, proc:, type:, var:, inv:, scn:, gui:). Removing a parent module rewrites child headers (drops / Parent).
-- replace-process-body: id of proc:, set pre and/or post (structured NL or predicate; implies and => are valid).
+- replace-process-body: id of proc:, set fsf to the full FSF text "FSF : T1 && D1 || T2 && D2 || … || others && Dn" (structured natural language is allowed inside Ti/Di). Use pre/post only for legacy documents that already use them.
 FORBIDDEN: replace-document, asflText, dumping several modules as one string, "-- comments" as source.
 Add SYSTEM_ first, then one semantic module at a time with parentId pointing at the system module, then its types/vars/invs/processes as separate operations. Prefer updating an existing id over adding a duplicate.
 Never put end_module, a whole module, or a process block inside type/var/inv/pre/post text — that wipes the document.
 After a write is applied, call read_hybrid_specification and keep patching until the inventory matches the plan and Diagnostics lists no syntax errors. A module with processes and no cdfd is backward compatible — do not add a cdfd just to clear a warning.
-Formalize informal pre/post atoms only via propose_refinement_step kind=FormalizePredicate.
+Formalize informal FSF atoms only via propose_refinement_step kind=FormalizePredicate.
 Decompose a process with kind=DecomposeProcess (child module, empty cdfd, matching ports, decom set to that module).
 Write or replace a module CDFD with kind=SetCdfd: moduleName plus toText, either a full "cdfd ... end_cdfd" block or the inner lines. One cdfd per module. Syntax:
   port in <name> / port out <name>
@@ -1949,7 +2454,9 @@ node names are processes in that module; store names are vars; ports match the p
 - Informal atoms that you rewrite via source edit still need propose_refinement_step kind=FormalizePredicate or process ambiguity will not drop.
 - Do not retry the same failing CRUD patch. After two CRUD failures you MUST switch to propose_source_edit.` : "You do not have write permission for source edits.";
   const refinementGuide = permissions.hybrid.read ? `Dual-line refinement (guide the user; do not auto-refine the whole tree):
-- Journey: Informal → Hybrid+GUI → process atomicity + data discharge until the refinement digest reports unambiguous=true.
+- Journey: Informal → Hybrid+GUI → process atomicity + data discharge + operational grain until the refinement digest reports unambiguous=true.
+- Operational grain: a leaf is not atomic just because pre/post are formal. If the digest lists variations or a name-claim, ask_clarification about those extracted items only, then ClassifyGrain or ResolveVariation. Do not invent operations, and do not clear grainAmbiguity by rewriting pre/post.
+- Predicate text must lex as ASFL. There is no VDM post-state prime and no ^. The final value is the bare name (~x is the initial value). Sequence append is conc(seq, elem). != is <>. Studio rewrites a trailing prime and a clear ^ before the write is kept, and it refuses a write that would add syntax errors. If a tool result says the write was not kept or a patch already failed, rewrite that fragment and re-propose. Do not retry the identical text and do not stop.
 - Empty name-only modules and stub (name-only) processes are gaps. Hybrid generation does not finish the specification.
 - After Hybrid/GUI work for this turn is done, if unambiguous=false, ask_clarification with 2–4 next slices from the digest. Wait for the user unless they already named a slice.
 - Prefer propose_refinement_step, then propose_hybrid_changes. Fallback: propose_source_edit on Hybrid.
@@ -1973,10 +2480,12 @@ Agile-SOFL conventions:
 - There is exactly one system module. Name it SYSTEM_<SystemName> after the whole product (e.g. SYSTEM_FoodDelivery). It is the root; every other module is a child: module Auth / FoodDelivery;
 - SYSTEM_ is listed first in the .asfl file. Do not treat GUI_App or a feature module as the system module.
 - Processes without known ports use signature (). Inventing (x: nat) ok: nat is wrong.
-- Invariants and pre/post may use implies or =>.
+- There is no implication operator: write not A or B instead. Process logic is written as FSF: FSF : T1 && D1 || T2 && D2 || … || others && Dn.
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.
 
 Never claim you already modified the file. Writes go through propose_* tools. User Apply/Reject (or auto-write) is only a tool result — you MUST continue the same task.
+A tool result with type user_instruction is the user's own words while a change card was still open. That change was neither applied nor rejected. Interpret the words yourself: re-propose the same change if they want it, propose a revision if they want something else, or drop it if they declined. Then continue the task. Do not stop.
+Clarification tool results include "selected" (clicked options) and "custom" (text the user typed). If custom is non-empty, you MUST use it. Single-choice (multiSelect false) does not discard custom, and a clicked option does not override it. When both are present, follow both.
 After any applied write, call read_specification and/or read_hybrid_specification (and read_refinement_state when Hybrid changed), verify inventory, Hybrid Diagnostics, and dual-line gaps, and propose another patch if anything is missing, wrong, or still has syntax errors. Repeat until the current task slice is done.
 When the whole task is done, your LAST message is a short summary of what was completed. Do not wait for the user to say "continue". If Hybrid exists and the digest is not unambiguous, that summary must invite the next refinement slice (ask_clarification) unless the user already declined further refinement.
 Prefer structured CRUD. Do not dump raw Markdown or raw SOFL through propose_changes / propose_hybrid_changes. If those tools fail or cannot express the fix, read view=source and use propose_source_edit.
@@ -2182,6 +2691,49 @@ function attachStreamDeltas(live, sink) {
     }
   };
 }
+const AGENT_THINKING = false;
+function retryReasonOf(e) {
+  const msg = e instanceof Error ? e.message : String(e);
+  const status = /\b(4\d\d|5\d\d)\b/.exec(msg)?.[1];
+  return (status ? `HTTP ${status}: ` : "") + msg.replace(/\b(sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+)/g, "[redacted]").slice(0, 120);
+}
+async function loggedStream(projectRoot, sessionId, options, meta = { attempt: 1 }) {
+  const callMeta = { reasoning: reasoningEffortFor(options.thinking), attempt: meta.attempt, ...meta.retryReason ? { retryReason: meta.retryReason } : {} };
+  const cfg = getExperimentConfig(projectRoot);
+  announceCondition(projectRoot, sessionId, cfg);
+  const t0 = Date.now();
+  const promptChars = JSON.stringify(options.messages).length;
+  try {
+    const c = await chatEcnuStream(options);
+    logTelemetry(projectRoot, cfg, sessionId, {
+      event: "llm_call",
+      model: c.model ?? getEcnuConfig().model,
+      promptTokens: c.usage?.promptTokens ?? null,
+      completionTokens: c.usage?.completionTokens ?? null,
+      latencyMs: Date.now() - t0,
+      ok: true,
+      ...callMeta,
+      finishReason: c.finishReason,
+      toolCalls: c.toolCalls.map((t) => t.function.name),
+      promptChars,
+      prompt: cfg.logPrompts ? options.messages : void 0
+    });
+    return c;
+  } catch (e) {
+    logTelemetry(projectRoot, cfg, sessionId, {
+      event: "llm_call",
+      model: getEcnuConfig().model,
+      promptTokens: null,
+      completionTokens: null,
+      latencyMs: Date.now() - t0,
+      ok: false,
+      ...callMeta,
+      promptChars,
+      error: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)
+    });
+    throw e;
+  }
+}
 async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
   if (userText?.trim()) {
     session.messages.push({
@@ -2249,9 +2801,9 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
     const streamDeltas = attachStreamDeltas(live, sink);
     let completion;
     try {
-      completion = await chatEcnuStream({
+      completion = await loggedStream(projectRoot, session.id, {
         ...request,
-        thinking: true,
+        thinking: AGENT_THINKING,
         signal,
         onDelta: streamDeltas.onDelta
       });
@@ -2266,12 +2818,12 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
         return session;
       }
       try {
-        completion = await chatEcnuStream({
+        completion = await loggedStream(projectRoot, session.id, {
           ...request,
           thinking: false,
           signal,
           onDelta: streamDeltas.onDelta
-        });
+        }, { attempt: 2, retryReason: retryReasonOf(first) });
       } catch (err) {
         streamDeltas.flush();
         live.streaming = false;
@@ -2371,7 +2923,7 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
               continue;
             }
           }
-          const patch = call.function.name === "propose_refinement_step" ? {
+          let patch = call.function.name === "propose_refinement_step" ? {
             target: "hybrid",
             mode: "crud",
             explanation: typeof args.explanation === "string" ? args.explanation : void 0,
@@ -2389,7 +2941,10 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
                 representationType: args.representationType,
                 retrieveFunction: args.retrieveFunction,
                 retrieveBody: args.retrieveBody,
-                note: args.note
+                note: args.note,
+                grainClass: args.grainClass,
+                variationId: args.variationId,
+                disposition: args.disposition
               }
             ]
           } : {
@@ -2413,6 +2968,31 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
             live.content = live.content || `No ${target} write permission.`;
             markCallStatus(live, call.id, "error", sink);
             continue;
+          }
+          if (target === "hybrid") {
+            const normalized = normalizeHybridPatch(patch);
+            patch = normalized.patch;
+            if (normalized.unresolved) {
+              const error = `Could not auto-repair illegal ASFL (${normalized.unresolved}).`;
+              session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
+                fingerprint: patchFingerprint(patch),
+                error,
+                mode
+              });
+              session.messages.push({
+                id: call.id,
+                role: "tool",
+                content: JSON.stringify({
+                  ok: false,
+                  error,
+                  next: "Rewrite ^ as conc(seq, elem) and drop VDM primes. Re-propose a different patch. Do not stop."
+                }),
+                timestamp: (/* @__PURE__ */ new Date()).toISOString()
+              });
+              live.content = live.content || error;
+              markCallStatus(live, call.id, "error", sink);
+              continue;
+            }
           }
           const blocked = crudBlockedByFailures(session.context.lastFailedWrite, {
             fingerprint: patchFingerprint(patch),
@@ -2491,7 +3071,7 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
         if (call.function.name === "read_hybrid_specification") {
           const view = args.view === "source" ? "source" : "inventory";
           const body = !permissions.hybrid.read ? "(Hybrid read permission off)" : view === "source" ? numberedHybridSource(ctx.hybridAsfl) : compactHybrid(ctx.hybridAsfl);
-          const diagnostics = permissions.hybrid.read ? hybridDiagnosticsPayload(ctx.hybridAsfl) : { count: 0, errors: 0, items: [] };
+          const diagnostics = permissions.hybrid.read ? await hybridDiagnosticsWithSemantic(ctx.hybridAsfl, getExperimentConfig(projectRoot)) : { count: 0, errors: 0, items: [] };
           session.messages.push({
             id: call.id,
             role: "tool",
@@ -2592,7 +3172,11 @@ function completeSiblingToolCalls(session, calls, keepId) {
     session.messages.push({
       id: call.id,
       role: "tool",
-      content: JSON.stringify({ skipped: true, reason: "Paused for a user decision on another tool." }),
+      content: JSON.stringify({
+        skipped: true,
+        tool: call.function?.name,
+        reason: "Not executed. Another tool in this turn is waiting for Apply or Reject. After that tool result, call this tool again if the work is still needed. Do not treat this skip as a user rejection."
+      }),
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
   }
@@ -2612,6 +3196,28 @@ async function resumeWithToolResult(session, projectRoot, ctx, toolCallId, resul
   );
   const patch = pending?.proposedChanges;
   if (patch) {
+    const cfg = getExperimentConfig(projectRoot);
+    const op0 = patch.operations?.[0];
+    const isRefine = op0?.op === "refine-step";
+    if (payload.action === "applied" || payload.action === "rejected" || payload.action === "error") {
+      logTelemetry(projectRoot, cfg, session.id, {
+        event: "proposal_decision",
+        tool: isRefine ? "propose_refinement_step" : patch.mode === "source" ? "propose_source_edit" : `propose_${patch.target ?? "informal"}_changes`,
+        stepType: isRefine ? String(op0?.kind ?? "") : void 0,
+        decision: payload.action === "applied" && !payload.error ? "approved" : payload.action === "rejected" ? "rejected" : "error",
+        toolCallId
+      });
+    }
+    if (payload.action === "applied" && !payload.error && patch.target === "hybrid" && ctx.hybridAsfl !== void 0) {
+      try {
+        logTelemetry(projectRoot, cfg, session.id, {
+          event: "post_write_diagnostics",
+          toolCallId,
+          diagnostics: await diagnosticCounts(ctx.hybridAsfl, cfg)
+        });
+      } catch {
+      }
+    }
     if (payload.action === "applied" && !payload.error) {
       session.context.lastFailedWrite = void 0;
     } else if (payload.action === "error" || payload.action === "applied" && payload.error) {
@@ -2622,31 +3228,63 @@ async function resumeWithToolResult(session, projectRoot, ctx, toolCallId, resul
       });
     }
   }
+  const clarificationMsg = session.messages.find(
+    (m) => m.pending && m.clarification && (m.clarification.pendingToolCallId === toolCallId || session.context.pendingToolCallId === toolCallId)
+  );
+  const pendingWrite = session.messages.find(
+    (m) => m.pending && m.proposedChanges && !m.clarification && session.context.pendingToolCallId === toolCallId
+  );
+  let toolContent = result;
+  let clarificationDisplay;
+  if (payload.type === "user_instruction") toolContent = userInstructionToolResult(payload.text || result);
+  else if (payload.action === "applied")
+    toolContent = appliedToolResult({ error: payload.error, userNote: payload.userNote, repair: payload.repair });
+  else if (payload.action === "error") toolContent = failedToolResult(payload.error || "Tool failed", payload.userNote);
+  else if (payload.action === "rejected") toolContent = rejectedToolResult();
+  else if (clarificationMsg?.clarification) {
+    const formatted = formatClarificationToolContent(result, {
+      labels: clarificationMsg.clarification.options?.map((option) => option.label),
+      multiSelect: clarificationMsg.clarification.multiSelect
+    });
+    toolContent = formatted.toolContent;
+    clarificationDisplay = formatted.display;
+  } else if (pendingWrite) {
+    toolContent = failedToolResult(
+      "The pending change was not applied. A chat reply does not reject it.",
+      result
+    );
+  } else {
+    toolContent = JSON.stringify({
+      type: "clarification_answer",
+      answer: result,
+      custom: result,
+      next: "custom is text the user typed. You MUST use it even when the question was single-choice. Then continue the task."
+    });
+  }
   for (const m of session.messages) {
     if (!m.pending) continue;
     if (m.clarification?.pendingToolCallId === toolCallId || session.context.pendingToolCallId === toolCallId) {
       m.pending = false;
       if (m.clarification) {
-        m.clarification.answer = result;
+        m.clarification.answer = clarificationDisplay ?? result;
         m.resolution = "answered";
       }
       if (m.proposedChanges) {
-        m.resolution = payload.action === "applied" ? "applied" : payload.action === "error" ? "error" : "rejected";
-        if (payload.error) m.toolError = payload.error;
+        if (payload.type === "user_instruction") {
+          m.resolution = "answered";
+        } else {
+          const unansweredWrite = !payload.action && pendingWrite;
+          m.resolution = payload.action === "applied" ? "applied" : payload.action === "error" || unansweredWrite ? "error" : "rejected";
+          if (payload.error) m.toolError = payload.error;
+          else if (unansweredWrite) m.toolError = "Pending change was not applied.";
+        }
       }
     }
   }
-  if (payload.action === "applied") result = appliedToolResult({ error: payload.error });
-  else if (payload.action === "error") result = failedToolResult(payload.error || "Tool failed");
-  else if (payload.action === "rejected") result = rejectedToolResult();
   session.messages.push({
     id: toolCallId,
     role: "tool",
-    content: payload.action ? result : JSON.stringify({
-      type: "clarification_answer",
-      answer: result,
-      next: "Continue with ask_clarification or propose_changes / propose_hybrid_changes. If writes are stuck, read view=source and propose_source_edit. After writes, read the spec to verify. Finish with a summary. Do not stop with an empty message."
-    }),
+    content: toolContent,
     timestamp: (/* @__PURE__ */ new Date()).toISOString()
   });
   session.context.pendingToolCallId = void 0;
@@ -4042,6 +4680,7 @@ function createWindow() {
 }
 electron.app.whenReady().then(async () => {
   loadStudioEnv();
+  console.warn(conditionNotice(getExperimentConfig()));
   registerFileHandlers(getWindow);
   registerWindowHandlers(getWindow);
   registerProjectHandlers(getWindow);

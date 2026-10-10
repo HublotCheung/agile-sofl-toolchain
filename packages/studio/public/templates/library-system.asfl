@@ -27,7 +27,7 @@ var
     catalog: Catalog;
     loan_flags: LoanMap;
 inv
-    forall[: book_ids] | b > 0 and forall[: catalog] | c > 0 and max_books_per_member > 0;
+    forall[b: book_ids] | b > 0 and forall[c: catalog] | c > 0 and max_books_per_member > 0;
 process Borrow (member_id: MemberId, book_id: BookId) success: nat
     ext
     rd book_ids: BookSet
@@ -108,7 +108,7 @@ process ResetFeatured ()
     ext
     wr featured: Catalog
     FSF :
-    true && sync_count = 0
+    true && featured = ~featured
 end_process
 end_module;
 module Reports / Library;

@@ -48,7 +48,7 @@ function close(): void {
     </button>
     <button
       type="button"
-      class="flex w-[46px] items-center justify-center text-content-secondary transition-colors duration-150 hover:bg-danger hover:text-white active:scale-[0.98]"
+      class="flex w-[46px] items-center justify-center text-content-secondary transition-colors duration-150 hover:bg-danger hover:text-danger-fg active:scale-[0.98]"
       :title="$t('window.close')"
       @click="close"
     >

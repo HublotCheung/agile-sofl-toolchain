@@ -27,7 +27,7 @@ var
     schedule: Schedule;
     waiting_count: nat;
 inv
-    forall[: queue] | p > 0 and forall[: doctors] | d > 0 and waiting_count >= 0;
+    forall[p: queue] | p > 0 and forall[d: doctors] | d > 0 and waiting_count >= 0;
 process Register (patient: PatientId, dept: DeptId) ticket: nat
     ext
     rd queue: PatientQueue

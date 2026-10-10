@@ -49,6 +49,24 @@ end_module`
     expect(next).toContain('decom: P_Decom')
   })
 
+  it('FormalizePredicate matches informal text when only whitespace differs', () => {
+    const source = `module SYSTEM_P;
+process P (x: nat) y: nat
+pre account_of ( user_id )
+post y is produced
+end_process
+end_module`
+    const formalized = applyRefinementStep(source, [], {
+      kind: 'FormalizePredicate',
+      fromText: 'account_of(user_id)',
+      toText: 'user_id > 0',
+      clause: 'pre'
+    })
+    expect(formalized.error).toBeUndefined()
+    expect(formalized.source).toContain('user_id > 0')
+    expect(formalized.source).not.toContain('account_of')
+  })
+
   it('counts unlogged informal removals', () => {
     const before = `module SYSTEM_P;
 process P ()
