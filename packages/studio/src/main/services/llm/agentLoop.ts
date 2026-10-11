@@ -31,6 +31,7 @@ import {
   userInstructionToolResult,
   validateAgentPatch
 } from './agentPatch'
+import { parseToolArguments } from './parseToolArgs'
 
 const MAX_HISTORY = 20
 
@@ -182,17 +183,19 @@ function systemPrompt(ctx: AgentTurnContext, permissions: AgentSpecPermissions):
     )
   }
   if (permissions.hybrid.write || permissions.informal.write) {
-    toolLines.push('- propose_gui_changes: GUI HTML structure patches — full-screen prototypes with as-* layout, not a few buttons')
+    toolLines.push(
+      '- propose_gui_changes: one GUI screen per call (full layout). Inline <script type="text/as-logic"> may animate that screen; it runs in a sandbox and cannot reload Studio'
+    )
   }
   if (permissions.informal.write || permissions.hybrid.write) {
     toolLines.push(
-      '- propose_source_edit: last-resort Informal/Hybrid source edit (replace/append/replace-document) when CRUD cannot unstick'
+      '- propose_source_edit: last-resort source edit (target informal, hybrid, or gui) when CRUD cannot unstick'
     )
   }
 
   const informalGuide = permissions.informal.write
     ? `For propose_changes, operate on the CURRENT Informal inventory (ids like fn-login, dr-account, c-unique):
-- add: target = functions | data-resources | constraints (or a parent node id). node.type = function | data-resource | data-field | constraint. Include title and description.
+- add: target = functions | data-resources | constraints, or any parent node id. Nesting depth is unlimited for functions, data sources (children are data-field), and constraints. node.type = function | data-resource | data-field | constraint. Include title and description. Optional node.children repeats the same shape.
 - update: id = existing node id (or unique title). Set title and/or description.
 - remove: id = existing node id.
 - move: id + parentId + optional afterId.
@@ -227,17 +230,19 @@ node names are processes in that module; store names are vars; ports match the p
       ? `For propose_gui_changes, design a high-fidelity product prototype the user can walk through:
 - Each screen should look like a finished app surface: shell/sidebar or navbar, hero or toolbar, cards/lists/tables/forms, badges, empty states, primary+secondary actions.
 - Each screen is a separate HTML page. Clicking data-nav must switch screens; the screen list follows. Do not put the whole app into one un-navigable view.
+- ONE screen per tool call (add-screen or replace-screen-html). A long multi-screen payload is often truncated and rejected. If a call is recovered after truncation, continue with the next screen in a new call.
 - Prefer replace-screen-html (or add-screen with html) with the FULL inner markup of that screen. All children are kept; do not flatten a layout down to the first widget.
 - Tags: common HTML5 (header/main/aside/nav/table/form/img/a/…). Classes: any as-* token (as-shell, as-hero, as-card, as-grid-3, as-btn-primary, …). Bind with data-process / data-bind / data-nav.
 - Do not ship a page that is only two or three unlabeled buttons. Navigation must be visible in the layout, not implied.
-- Never emit <script>, style=, href, or src.`
+- Prototype logic may be an inline <script type="text/as-logic"> (calculations, setInterval / requestAnimationFrame number ticks, button feedback). It runs in a sandbox iframe: it can query and update the prototype DOM, and it cannot reload Studio, open windows, or use the network. Also allowed: onclick, oninput, onchange. Do not emit <script src>, javascript: URLs, href, src, or style=.
+- Buttons inside forms must not rely on form submit. Use type="button" plus data-nav / data-process, or a logic script.`
       : 'You do not have GUI write permission. Do not call propose_gui_changes.'
 
   const sourceGuide =
     permissions.informal.write || permissions.hybrid.write
       ? `propose_source_edit is an escape hatch, not the default:
 - Prefer propose_changes / propose_hybrid_changes / propose_gui_changes / propose_refinement_step for almost every write.
-- Use source edit after CRUD fails, when leftover unparsed text remains, when inventory is empty/out of sync with the file, when Diagnostics lists syntax/parse errors CRUD cannot fix, or when you must fix text CRUD cannot express.
+- Use source edit after CRUD fails, when leftover unparsed text remains, when inventory is empty/out of sync with the file, when Diagnostics lists syntax/parse errors CRUD cannot fix, or when you must fix text CRUD cannot express. For GUI pass target "gui". Do not replace the whole GUI document in one call; patch one screen.`
 - First call read_* with view=source (or read_refinement_state then source). Then replace a UNIQUE oldText snippet, append, or replace-document.
 - Informal atoms that you rewrite via source edit still need propose_refinement_step kind=FormalizePredicate or process ambiguity will not drop.
 - Do not retry the same failing CRUD patch. After two CRUD failures you MUST switch to propose_source_edit.`
@@ -399,13 +404,6 @@ function toApiMessages(
   return msgs
 }
 
-function parseArgs(raw: string): Record<string, unknown> {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    return {}
-  }
-}
 
 function settleFinishedToolCalls(session: AgentSession): void {
   for (const msg of session.messages) {
@@ -429,6 +427,11 @@ function emit(sink: AgentStreamSink | undefined, event: AgentStreamEvent): void 
 }
 
 const TOOL_DELTA_THROTTLE_MS = 50
+const TEXT_DELTA_THROTTLE_MS = 80
+
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
 
 function emitToolCall(
   sink: AgentStreamSink | undefined,
@@ -438,13 +441,17 @@ function emitToolCall(
 ): void {
   const call = live.toolCalls?.[index]
   if (!call) return
+  const args =
+    status === 'streaming' && call.arguments.length > 12000
+      ? call.arguments.slice(0, 4000)
+      : call.arguments
   emit(sink, {
     kind: 'tool_call',
     messageId: live.id,
     index,
     id: call.id,
     name: call.name,
-    arguments: call.arguments,
+    arguments: args,
     status
   })
 }
@@ -473,27 +480,58 @@ function markRemainingToolCalls(
 }
 
 function attachStreamDeltas(live: AgentMessage, sink?: AgentStreamSink) {
-  let lastEmitAt = 0
-  let pending = false
+  let lastToolEmitAt = 0
+  let toolsPending = false
+  let textTimer: ReturnType<typeof setTimeout> | null = null
+  let lastTextEmitAt = 0
+  let lastSentContent = ''
+  let lastSentThinking = ''
   const seenNames = new Set<string>()
 
   const emitSnapshot = (): void => {
-    pending = false
-    lastEmitAt = Date.now()
+    toolsPending = false
+    lastToolEmitAt = Date.now()
     for (let i = 0; i < (live.toolCalls?.length ?? 0); i++) {
       emitToolCall(sink, live, i, live.toolCalls![i].status ?? 'streaming')
     }
   }
 
+  const flushText = (): void => {
+    if (textTimer) {
+      clearTimeout(textTimer)
+      textTimer = null
+    }
+    lastTextEmitAt = Date.now()
+    const thinking = live.thinking ?? ''
+    if (thinking !== lastSentThinking) {
+      lastSentThinking = thinking
+      if (thinking) emit(sink, { kind: 'reasoning', messageId: live.id, text: thinking })
+    }
+    if (live.content !== lastSentContent) {
+      lastSentContent = live.content
+      if (live.content) emit(sink, { kind: 'content', messageId: live.id, text: live.content })
+    }
+  }
+
+  const scheduleText = (): void => {
+    const now = Date.now()
+    if (now - lastTextEmitAt >= TEXT_DELTA_THROTTLE_MS) {
+      flushText()
+      return
+    }
+    if (textTimer) return
+    textTimer = setTimeout(() => {
+      textTimer = null
+      flushText()
+    }, TEXT_DELTA_THROTTLE_MS - (now - lastTextEmitAt))
+  }
+
   return {
     onDelta(delta: ChatStreamDelta): void {
-      if (delta.reasoning != null) {
-        live.thinking = delta.reasoning
-        emit(sink, { kind: 'reasoning', messageId: live.id, text: delta.reasoning })
-      }
-      if (delta.content != null) {
-        live.content = delta.content
-        emit(sink, { kind: 'content', messageId: live.id, text: delta.content })
+      if (delta.reasoning != null || delta.content != null) {
+        if (delta.reasoning != null) live.thinking = delta.reasoning
+        if (delta.content != null) live.content = delta.content
+        scheduleText()
       }
       if (!delta.toolCalls) return
       live.toolCalls = delta.toolCalls.map((c, i) => ({
@@ -509,15 +547,18 @@ function attachStreamDeltas(live: AgentMessage, sink?: AgentStreamSink) {
         seenNames.add(key)
         return true
       })
+      const heavy = (live.toolCalls ?? []).some((c) => c.arguments.length > 8000)
+      const wait = heavy ? 200 : TOOL_DELTA_THROTTLE_MS
       const now = Date.now()
-      if (nameAppeared || now - lastEmitAt >= TOOL_DELTA_THROTTLE_MS) {
+      if (nameAppeared || now - lastToolEmitAt >= wait) {
         emitSnapshot()
         return
       }
-      pending = true
+      toolsPending = true
     },
     flush(): void {
-      if (pending || live.toolCalls?.length) emitSnapshot()
+      flushText()
+      if (toolsPending || live.toolCalls?.length) emitSnapshot()
     }
   }
 }
@@ -703,6 +744,7 @@ export async function runAgentTurn(
     }
 
     streamDeltas.flush()
+    await yieldToUi()
     live.streaming = false
     live.content = completion.content.trim()
     live.thinking = completion.reasoning.trim() || live.thinking
@@ -730,7 +772,32 @@ export async function runAgentTurn(
 
     if (completion.toolCalls.length) {
       for (const call of completion.toolCalls) {
-        const args = parseArgs(call.function.arguments || '{}')
+        await yieldToUi()
+        const parsedArgs = parseToolArguments(call.function.arguments || '{}')
+        if (!parsedArgs.ok) {
+          session.messages.push({
+            id: call.id,
+            role: 'tool',
+            content: JSON.stringify({
+              ok: false,
+              error: parsedArgs.error,
+              next: 'Do not resend that payload. Split it into smaller tool calls and continue.'
+            }),
+            timestamp: new Date().toISOString()
+          })
+          live.content = live.content || parsedArgs.error
+          markCallStatus(live, call.id, 'error', sink)
+          continue
+        }
+        const args = parsedArgs.value
+        if (parsedArgs.droppedPartialOperation) {
+          const note =
+            'Recovered a truncated tool call. The incomplete last operation was dropped. Continue the remaining work in a new, smaller call.'
+          args.explanation =
+            typeof args.explanation === 'string' && args.explanation.trim()
+              ? `${args.explanation}\n\n${note}`
+              : note
+        }
         if (call.function.name === 'ask_clarification') {
           const options = Array.isArray(args.options)
             ? (args.options as Array<{ id?: string; label?: string }>)
@@ -771,7 +838,7 @@ export async function runAgentTurn(
           else if (call.function.name === 'propose_gui_changes') target = 'gui'
           else {
             const raw = typeof args.target === 'string' ? args.target : ''
-            if (raw === 'hybrid' || raw === 'informal') {
+            if (raw === 'hybrid' || raw === 'informal' || raw === 'gui') {
               target = raw
             } else if (permissions.hybrid.write && !permissions.informal.write) {
               target = 'hybrid'
@@ -783,8 +850,8 @@ export async function runAgentTurn(
                 role: 'tool',
                 content: JSON.stringify({
                   ok: false,
-                  error: 'propose_source_edit requires target: "informal" or "hybrid".',
-                  next: 'Re-call propose_source_edit with an explicit target after read_* view=source.'
+                  error: 'propose_source_edit requires target: "informal", "hybrid", or "gui".',
+                  next: 'Re-call propose_source_edit with an explicit target after read_* view=source. For GUI, target is "gui" and each call should touch one screen.'
                 }),
                 timestamp: new Date().toISOString()
               })
@@ -900,11 +967,14 @@ export async function runAgentTurn(
           }
           const validity = validateAgentPatch(target, patch, { mode })
           if (!validity.ok) {
-            session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
-              fingerprint: patchFingerprint(patch),
-              error: validity.message,
-              mode
-            })
+            const emptyPatch = !Array.isArray(patch.operations) || patch.operations.length === 0
+            if (!emptyPatch) {
+              session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
+                fingerprint: patchFingerprint(patch),
+                error: validity.message,
+                mode
+              })
+            }
             session.messages.push({
               id: call.id,
               role: 'tool',

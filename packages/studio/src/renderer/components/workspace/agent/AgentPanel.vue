@@ -32,7 +32,10 @@ import {
   composerAction,
   enqueueMessage,
   removeQueuedMessage,
+  sessionStillRunning,
   shiftQueuedMessage,
+  shouldAutoFlushQueue,
+  takeQueuedMessage,
   updateQueuedMessage,
   type AgentQueuedMessage
 } from './agentQueue'
@@ -65,8 +68,16 @@ const modal = useModalStore()
 const sessions = ref<AgentSessionPayload[]>([])
 const session = ref<AgentSessionPayload | null>(null)
 const input = ref('')
-const busy = ref(false)
-const queuedMessages = ref<AgentQueuedMessage[]>([])
+type SessionRun = {
+  busy: boolean
+  stopRequested: boolean
+  turnInFlight: boolean
+  holdQueue: boolean
+  agentCalls: number
+  autoApplyLock: boolean
+  queue: AgentQueuedMessage[]
+}
+const runs = ref<Record<string, SessionRun>>({})
 const editingQueueId = ref<string | null>(null)
 const queueEditDraft = ref('')
 const queueEditInput = ref<HTMLInputElement | null>(null)
@@ -88,9 +99,10 @@ const sessionListRatio = ref(0.2)
 const copiedId = ref<string | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 let launchInFlight = false
-let stopRequested = false
-let turnInFlight = false
+let projectGen = 0
+let openSeq = 0
 let pinThreadToBottom = true
+let scrollFrame = 0
 const agentSource = `agent-panel-${crypto.randomUUID()}`
 
 const projectRoot = computed(() => workspace.activeProject?.rootPath ?? '')
@@ -104,6 +116,13 @@ const lastClarificationId = computed(() => {
 const visibleMessages = computed(
   () => session.value?.messages.filter((m) => m.role !== 'tool') ?? []
 )
+const liveSessions = new Map<string, AgentSessionPayload>()
+const activeSessionId = computed(() => session.value?.id ?? '')
+const busy = computed(() => (activeSessionId.value ? runOf(activeSessionId.value).busy : false))
+const queuedMessages = computed(() =>
+  activeSessionId.value ? runOf(activeSessionId.value).queue : []
+)
+const anyBusy = computed(() => Object.values(runs.value).some((run) => run.busy))
 const composerMode = computed(() => composerAction(busy.value, input.value))
 const liveToolStatus = computed(() => {
   if (!busy.value) return ''
@@ -126,9 +145,52 @@ const liveToolStatus = computed(() => {
   return t('agent.working')
 })
 
-function ctx() {
+function emptyRun(): SessionRun {
+  return {
+    busy: false,
+    stopRequested: false,
+    turnInFlight: false,
+    holdQueue: false,
+    agentCalls: 0,
+    autoApplyLock: false,
+    queue: []
+  }
+}
+
+function runOf(id: string): SessionRun {
+  return runs.value[id] ?? emptyRun()
+}
+
+function patchRun(id: string, patch: Partial<SessionRun>): void {
+  if (!id) return
+  const prev = runs.value[id] ?? emptyRun()
+  runs.value = { ...runs.value, [id]: { ...prev, ...patch } }
+}
+
+function sessionIsBusy(id: string): boolean {
+  return Boolean(runs.value[id]?.busy)
+}
+
+function publishSession(next: AgentSessionPayload): void {
+  liveSessions.set(next.id, next)
+  const listed = sessions.value.find((item) => item.id === next.id)
+  if (listed && listed.title !== next.title) listed.title = next.title
+  if (session.value?.id === next.id) session.value = next
+}
+
+function showSession(next: AgentSessionPayload): void {
+  liveSessions.set(next.id, next)
+  session.value = next
+}
+
+function liveSession(id: string): AgentSessionPayload | null {
+  if (session.value?.id === id) return session.value
+  return liveSessions.get(id) ?? null
+}
+
+function ctxFor(target: AgentSessionPayload) {
   const root = workspace.activeProject?.rootPath ?? ''
-  return toIpcValue({
+  return {
     projectName: workspace.activeProject?.name,
     projectRoot: root,
     moduleId: workspace.selectedModuleName ?? 'project',
@@ -136,10 +198,48 @@ function ctx() {
     hybridAsfl: workspace.hybridTab?.content ?? '',
     guiHtml: workspace.guiTab?.content ?? '',
     selectedNodeId: workspace.informalSelectedNodeId ?? undefined,
-    skillId: session.value?.context.skillId || 'requirement-discovery',
-    permissions: session.value?.context.permissions,
-    promptExtras: session.value?.context.promptExtras
+    skillId: target.context.skillId || 'requirement-discovery',
+    permissions: target.context.permissions,
+    promptExtras: target.context.promptExtras
+  }
+}
+
+function beginCall(sessionId: string, opts?: { turn?: boolean; clearStop?: boolean }): void {
+  const prev = runOf(sessionId)
+  patchRun(sessionId, {
+    busy: true,
+    stopRequested: opts?.clearStop ? false : prev.stopRequested,
+    turnInFlight: opts?.turn ? true : prev.turnInFlight,
+    agentCalls: prev.agentCalls + 1
   })
+}
+
+async function finishCall(
+  sessionId: string,
+  rootAtStart: string,
+  gen: number,
+  opts: { releaseTurn: boolean }
+): Promise<void> {
+  if (gen !== projectGen) return
+  patchRun(sessionId, { agentCalls: Math.max(0, runOf(sessionId).agentCalls - 1) })
+  try {
+    const alive = stillOnProject(rootAtStart)
+    const ready =
+      alive &&
+      runOf(sessionId).agentCalls === 0 &&
+      !runOf(sessionId).autoApplyLock &&
+      !runOf(sessionId).stopRequested
+    if (ready) await maybeAutoApply(sessionId)
+  } finally {
+    if (gen !== projectGen || !opts.releaseTurn) return
+    if (runOf(sessionId).agentCalls > 0 || runOf(sessionId).autoApplyLock) return
+    patchRun(sessionId, { busy: false, turnInFlight: false })
+    await nextTick()
+    if (session.value?.id === sessionId) {
+      thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
+    }
+    if (stillOnProject(rootAtStart)) await flushQueue(sessionId, false)
+  }
 }
 
 function stillOnProject(root: string): boolean {
@@ -156,6 +256,14 @@ async function scrollThreadIfPinned(): Promise<void> {
   if (!pinThreadToBottom) return
   await nextTick()
   thread.value?.scrollTo({ top: thread.value.scrollHeight })
+}
+
+function queueScroll(): void {
+  if (scrollFrame) return
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = 0
+    void scrollThreadIfPinned()
+  })
 }
 
 function isCardExpanded(id: string): boolean {
@@ -177,7 +285,7 @@ async function refresh(): Promise<void> {
 async function ensureSession(): Promise<AgentSessionPayload | null> {
   if (session.value) return session.value
   if (!projectRoot.value || !window.studio?.agentCreateSession) return null
-  session.value = await window.studio.agentCreateSession(
+  const created = await window.studio.agentCreateSession(
     toIpcValue({
       projectRoot: projectRoot.value,
       moduleId: workspace.selectedModuleName ?? 'project',
@@ -187,97 +295,133 @@ async function ensureSession(): Promise<AgentSessionPayload | null> {
       }
     })
   )
+  if (!created) return null
+  showSession(created)
   await refresh()
-  return session.value
+  return created
 }
 
-async function send(text?: string): Promise<void> {
-  const fromInput = text == null
-  const body = (text ?? input.value).trim()
-  if (!body) {
-    if (!busy.value) await flushQueue()
+async function send(text?: string, opts?: { sessionId?: string }): Promise<void> {
+  const fromComposer = text == null
+  const typed = (text ?? input.value).trim()
+  let targetId = opts?.sessionId ?? session.value?.id ?? ''
+  if (!typed) {
+    if (targetId && !runOf(targetId).busy) await flushQueue(targetId, true)
     return
   }
-  if (busy.value) {
-    enqueueFromComposer(body)
-    return
-  }
-  error.value = ''
-  stopRequested = false
-  if (!configured.value) {
-    error.value = t('agent.missingKey')
-    return
-  }
-  const pendingId = session.value?.context.pendingToolCallId
-  if (pendingId) {
-    const pendingWrite = session.value?.messages.find(
-      (m) => m.pending && m.proposedChanges && !m.clarification
-    )
-    if (pendingWrite) {
-      if (fromInput) input.value = ''
-      if (settings.agentWriteMode === 'auto') {
-        await applyPatch(pendingWrite, body)
-        await maybeAutoApply()
-        return
-      }
-      await resume(pendingId, JSON.stringify({ type: 'user_instruction', text: body }), true)
-      await maybeAutoApply()
-      return
+  if (targetId && runOf(targetId).busy) {
+    const next = enqueueMessage(runOf(targetId).queue, typed)
+    if (next !== runOf(targetId).queue) {
+      patchRun(targetId, { queue: next })
+      if (fromComposer && session.value?.id === targetId) input.value = ''
     }
-    if (fromInput) input.value = ''
-    await resume(pendingId, clarificationResumePayload(pendingId, body), true)
+    return
+  }
+  const showError = !opts?.sessionId || opts.sessionId === session.value?.id
+  if (showError) error.value = ''
+  if (!configured.value) {
+    if (showError) error.value = t('agent.missingKey')
     return
   }
   const rootAtStart = projectRoot.value
-  const current = await ensureSession()
-  if (!current || !window.studio?.agentChat) return
-  if (!stillOnProject(rootAtStart)) return
-  if (fromInput) input.value = ''
-  pinThreadToBottom = true
-  turnInFlight = true
-  busy.value = true
-  agentCalls += 1
+  const gen = projectGen
+  let target = targetId ? liveSession(targetId) : null
+  if (!target && targetId && window.studio?.agentLoadSession) {
+    target = await window.studio.agentLoadSession(
+      toIpcValue({ projectRoot: rootAtStart, id: targetId })
+    )
+    if (target) liveSessions.set(target.id, target)
+  }
+  if (!target && fromComposer) {
+    target = await ensureSession()
+    targetId = target?.id ?? ''
+  }
+  if (!target || !targetId || !window.studio?.agentChat) return
+  if (!stillOnProject(rootAtStart) || gen !== projectGen) return
+  if (fromComposer && session.value?.id === targetId) input.value = ''
+  const pendingId = target.context.pendingToolCallId
+  if (pendingId) {
+    const pendingWrite = target.messages.find(
+      (m) => m.pending && m.proposedChanges && !m.clarification
+    )
+    patchRun(targetId, { stopRequested: false })
+    if (pendingWrite) {
+      if (settings.agentWriteMode === 'auto') {
+        await applyPatch(pendingWrite, typed, targetId)
+        await maybeAutoApply(targetId)
+        return
+      }
+      await resume(targetId, pendingId, JSON.stringify({ type: 'user_instruction', text: typed }), true)
+      await maybeAutoApply(targetId)
+      return
+    }
+    await resume(targetId, pendingId, clarificationResumePayload(target, pendingId, typed), true)
+    await maybeAutoApply(targetId)
+    return
+  }
+  if (session.value?.id === targetId) pinThreadToBottom = true
+  const context = ctxFor(target)
+  beginCall(targetId, { turn: true, clearStop: true })
   try {
     const next = await window.studio.agentChat(
       toIpcValue({
         projectRoot: rootAtStart,
-        sessionId: current.id,
-        text: body,
-        context: ctx()
+        sessionId: targetId,
+        text: typed,
+        context
       })
     )
-    if (!stillOnProject(rootAtStart)) return
-    session.value = next
+    if (!stillOnProject(rootAtStart) || gen !== projectGen) return
+    if (next) publishSession(next)
     await refresh()
   } catch (e) {
-    if (!stillOnProject(rootAtStart)) return
-    error.value = e instanceof Error ? e.message : String(e)
+    if (!stillOnProject(rootAtStart) || gen !== projectGen) return
+    if (session.value?.id === targetId) error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    agentCalls -= 1
-    busy.value = false
-    await nextTick()
-    thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
-    if (!stopRequested) await maybeAutoApply()
-    turnInFlight = false
-    if (!stopRequested) await flushQueue()
+    await finishCall(targetId, rootAtStart, gen, { releaseTurn: true })
   }
 }
 
 function enqueueFromComposer(text?: string): void {
+  const sessionId = session.value?.id
+  if (!sessionId) return
   const body = (text ?? input.value).trim()
-  const next = enqueueMessage(queuedMessages.value, body)
-  if (next !== queuedMessages.value) {
-    queuedMessages.value = next
+  const next = enqueueMessage(runOf(sessionId).queue, body)
+  if (next !== runOf(sessionId).queue) {
+    patchRun(sessionId, { queue: next })
     input.value = ''
   }
 }
 
-async function flushQueue(): Promise<void> {
-  if (busy.value || stopRequested) return
-  const { next, rest } = shiftQueuedMessage(queuedMessages.value)
+async function flushQueue(sessionId: string, manual: boolean): Promise<void> {
+  if (!sessionId) return
+  const run = runOf(sessionId)
+  if (run.busy || run.agentCalls > 0 || run.autoApplyLock) return
+  if (
+    !manual &&
+    !shouldAutoFlushQueue({
+      busy: false,
+      interrupted: run.holdQueue || run.stopRequested,
+      stillRunning: sessionStillRunning(liveSession(sessionId))
+    })
+  ) {
+    return
+  }
+  if (manual) patchRun(sessionId, { holdQueue: false, stopRequested: false })
+  const { next, rest } = shiftQueuedMessage(runOf(sessionId).queue)
   if (!next) return
-  queuedMessages.value = rest
-  await send(next.text)
+  patchRun(sessionId, { queue: rest })
+  await send(next.text, { sessionId })
+}
+
+async function sendQueued(itemId: string): Promise<void> {
+  const sessionId = session.value?.id
+  if (!sessionId || runOf(sessionId).busy) return
+  const { item, rest } = takeQueuedMessage(runOf(sessionId).queue, itemId)
+  if (!item) return
+  patchRun(sessionId, { queue: rest, stopRequested: false })
+  if (editingQueueId.value === itemId) cancelQueueEdit()
+  await send(item.text, { sessionId })
 }
 
 async function startQueueEdit(item: AgentQueuedMessage): Promise<void> {
@@ -290,8 +434,9 @@ async function startQueueEdit(item: AgentQueuedMessage): Promise<void> {
 
 function commitQueueEdit(): void {
   const id = editingQueueId.value
-  if (!id) return
-  queuedMessages.value = updateQueuedMessage(queuedMessages.value, id, queueEditDraft.value)
+  const sessionId = session.value?.id
+  if (!id || !sessionId) return
+  patchRun(sessionId, { queue: updateQueuedMessage(runOf(sessionId).queue, id, queueEditDraft.value) })
   editingQueueId.value = null
   queueEditDraft.value = ''
 }
@@ -327,6 +472,7 @@ async function commitUserMessageEdit(msg: AgentMessageView): Promise<void> {
   const text = userMessageEditDraft.value.trim()
   cancelUserMessageEdit()
   if (!text || !session.value || busy.value || msg.role !== 'user') return
+  const sessionId = session.value.id
   const original = (msg.content || '').trim()
   const msgIdx = session.value.messages.findIndex((m) => m.id === msg.id)
   const hasLater = msgIdx >= 0 && msgIdx < session.value.messages.length - 1
@@ -334,66 +480,76 @@ async function commitUserMessageEdit(msg: AgentMessageView): Promise<void> {
   const next = await window.studio?.agentRewindSession?.(
     toIpcValue({
       projectRoot: projectRoot.value,
-      id: session.value.id,
+      id: sessionId,
       throughMessageId: msg.id,
       mode: 'keep',
       exclusive: true
     })
   )
   if (!next) return
-  session.value = next
-  queuedMessages.value = []
+  showSession(next)
+  patchRun(sessionId, { queue: [], holdQueue: false })
   autoApplyTried.clear()
   await refresh()
   await send(text)
 }
 
 function deleteQueued(id: string): void {
-  queuedMessages.value = removeQueuedMessage(queuedMessages.value, id)
+  const sessionId = session.value?.id
+  if (!sessionId) return
+  patchRun(sessionId, { queue: removeQueuedMessage(runOf(sessionId).queue, id) })
   if (editingQueueId.value === id) cancelQueueEdit()
 }
 
-async function resume(toolCallId: string, result: string, continueTurn = true): Promise<void> {
-  if (!session.value || !window.studio?.agentResume) return
-  if (stopRequested) continueTurn = false
+async function resume(
+  sessionId: string,
+  toolCallId: string,
+  result: string,
+  continueTurn = true
+): Promise<void> {
+  const target = liveSession(sessionId)
+  if (!target || !window.studio?.agentResume) return
+  if (runOf(sessionId).stopRequested) continueTurn = false
+  const nested = runOf(sessionId).turnInFlight
   const rootAtStart = projectRoot.value
-  pinThreadToBottom = true
-  busy.value = true
-  agentCalls += 1
+  const gen = projectGen
+  if (session.value?.id === sessionId) pinThreadToBottom = true
+  const context = ctxFor(target)
+  beginCall(sessionId)
   try {
     const next = await window.studio.agentResume(
       toIpcValue({
         projectRoot: rootAtStart,
-        sessionId: session.value.id,
+        sessionId,
         toolCallId,
         result,
-        context: ctx(),
+        context,
         continueTurn
       })
     )
-    if (!stillOnProject(rootAtStart)) return
-    session.value = next
+    if (!stillOnProject(rootAtStart) || gen !== projectGen) return
+    if (next) publishSession(next)
     await refresh()
   } catch (e) {
-    if (!stillOnProject(rootAtStart)) return
-    error.value = e instanceof Error ? e.message : String(e)
+    if (!stillOnProject(rootAtStart) || gen !== projectGen) return
+    if (session.value?.id === sessionId) error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    agentCalls -= 1
-    busy.value = false
-    await nextTick()
-    thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
-    if (!stopRequested) await maybeAutoApply()
-    if (!turnInFlight && !autoApplyLock && !stopRequested) await flushQueue()
+    await finishCall(sessionId, rootAtStart, gen, { releaseTurn: !nested })
   }
 }
 
-async function applyPatch(msg: AgentMessageView, userNote?: string): Promise<boolean> {
-  if (stopRequested) return false
+async function applyPatch(
+  msg: AgentMessageView,
+  userNote?: string,
+  sessionId?: string
+): Promise<boolean> {
+  const id = sessionId ?? session.value?.id ?? ''
+  if (!id || runOf(id).stopRequested) return false
   const rootAtStart = projectRoot.value
   if (!stillOnProject(rootAtStart)) return false
   if (!msg.proposedChanges) return false
-  const toolId = session.value?.context.pendingToolCallId
-  const continueTurn = !stopRequested
+  const toolId = liveSession(id)?.context.pendingToolCallId
+  const continueTurn = !runOf(id).stopRequested
   try {
     const patch = JSON.parse(JSON.stringify(msg.proposedChanges)) as InformalPatchPayload
     const result =
@@ -409,21 +565,23 @@ async function applyPatch(msg: AgentMessageView, userNote?: string): Promise<boo
     const repair =
       'repairNotes' in result ? result.repairNotes?.filter(Boolean).join('; ') : undefined
     if (result.ok) {
-      error.value = ''
+      if (session.value?.id === id) error.value = ''
       if (!toolId) return false
       await resume(
+        id,
         toolId,
         JSON.stringify({ action: 'applied', userNote, repair: repair || undefined }),
         continueTurn
       )
       return true
     }
-    error.value = ''
+    if (session.value?.id === id) error.value = ''
     if (!toolId) {
-      error.value = result.error || t('agent.applyFailed')
+      if (session.value?.id === id) error.value = result.error || t('agent.applyFailed')
       return false
     }
     await resume(
+      id,
       toolId,
       JSON.stringify({
         action: result.applied ? 'applied' : 'error',
@@ -438,54 +596,63 @@ async function applyPatch(msg: AgentMessageView, userNote?: string): Promise<boo
     const message = e instanceof Error ? e.message : String(e)
     if (!stillOnProject(rootAtStart)) return false
     if (!toolId) {
-      error.value = message
+      if (session.value?.id === id) error.value = message
       return false
     }
-    await resume(toolId, JSON.stringify({ action: 'error', error: message, userNote }), continueTurn)
+    await resume(id, toolId, JSON.stringify({ action: 'error', error: message, userNote }), continueTurn)
     return false
   }
 }
 
 async function rejectPatch(_msg: AgentMessageView): Promise<void> {
-  const toolId = session.value?.context.pendingToolCallId
+  const id = session.value?.id
+  if (!id) return
+  const toolId = liveSession(id)?.context.pendingToolCallId
   if (!toolId) return
-  await resume(toolId, JSON.stringify({ action: 'rejected' }), true)
+  await resume(id, toolId, JSON.stringify({ action: 'rejected' }), true)
 }
 
 const autoApplyTried = new Set<string>()
-let agentCalls = 0
-let autoApplyLock = false
 
-async function maybeAutoApply(): Promise<void> {
+async function maybeAutoApply(sessionId?: string): Promise<void> {
+  const id = sessionId ?? session.value?.id ?? ''
+  if (!id) return
   if (settings.agentWriteMode !== 'auto') return
   if (!stillOnProject(projectRoot.value)) return
-  if (agentCalls > 0 || autoApplyLock) return
-  const pending = session.value?.messages.find((m) => m.pending && m.proposedChanges)
+  if (runOf(id).agentCalls > 0 || runOf(id).autoApplyLock) return
+  const target = liveSession(id)
+  const pending = target?.messages.find((m) => m.pending && m.proposedChanges)
   if (!pending) return
-  if (stopRequested) {
-    const toolId = session.value?.context.pendingToolCallId
-    if (toolId) await resume(toolId, JSON.stringify({ action: 'rejected' }), false)
+  if (runOf(id).stopRequested) {
+    const toolId = target?.context.pendingToolCallId
+    if (toolId) await resume(id, toolId, JSON.stringify({ action: 'rejected' }), false)
     return
   }
   if (autoApplyTried.has(pending.id)) return
-  autoApplyLock = true
+  patchRun(id, { autoApplyLock: true })
   autoApplyTried.add(pending.id)
   let applied = false
   try {
-    applied = await applyPatch(pending)
+    applied = await applyPatch(pending, undefined, id)
   } finally {
-    autoApplyLock = false
+    patchRun(id, { autoApplyLock: false })
   }
   if (!applied) {
-    const stillPending = session.value?.messages.some((m) => m.id === pending.id && m.pending && m.proposedChanges)
+    const stillPending = liveSession(id)?.messages.some(
+      (m) => m.id === pending.id && m.pending && m.proposedChanges
+    )
     if (stillPending) autoApplyTried.delete(pending.id)
     return
   }
-  await maybeAutoApply()
+  await maybeAutoApply(id)
 }
 
-function clarificationResumePayload(pendingId: string, composerText: string): string {
-  const msg = session.value?.messages.find(
+function clarificationResumePayload(
+  target: AgentSessionPayload,
+  pendingId: string,
+  composerText: string
+): string {
+  const msg = target.messages.find(
     (item) => item.pending && item.clarification?.pendingToolCallId === pendingId
   )
   if (!msg?.clarification) return composerText
@@ -514,7 +681,9 @@ function onClarificationDraft(msg: AgentMessageView, draft: ClarificationDraft):
 }
 
 async function answer(msg: AgentMessageView, value: string): Promise<void> {
-  const toolId = msg.clarification?.pendingToolCallId || session.value?.context.pendingToolCallId
+  const id = session.value?.id
+  if (!id) return
+  const toolId = msg.clarification?.pendingToolCallId || liveSession(id)?.context.pendingToolCallId
   if (!toolId) return
   const composer = input.value.trim()
   const payload = composer ? mergeClarificationCustom(value, composer) : value
@@ -525,8 +694,8 @@ async function answer(msg: AgentMessageView, value: string): Promise<void> {
   const nextPending = { ...pendingAnswerDrafts.value }
   delete nextPending[msg.id]
   pendingAnswerDrafts.value = nextPending
-  await resume(toolId, payload, true)
-  await maybeAutoApply()
+  await resume(id, toolId, payload, true)
+  await maybeAutoApply(id)
 }
 
 function messageText(msg: AgentMessageView): string {
@@ -560,7 +729,7 @@ async function forkFromMessage(msg: AgentMessageView): Promise<void> {
       title: t('agent.forkedTitle', { title: session.value.title })
     })
   )
-  if (copy) session.value = copy
+  if (copy) showSession(copy)
   await refresh()
 }
 
@@ -588,7 +757,7 @@ async function reopenClarification(msg: AgentMessageView, optionId: string): Pro
     if (!copy) return
     drafts.value = { ...drafts.value, [msg.id]: draft }
     cardOpen.value = { ...cardOpen.value, [msg.id]: true }
-    session.value = copy
+    showSession(copy)
     await refresh()
     return
   }
@@ -603,15 +772,22 @@ async function reopenClarification(msg: AgentMessageView, optionId: string): Pro
   if (!next) return
   drafts.value = { ...drafts.value, [msg.id]: draft }
   cardOpen.value = { ...cardOpen.value, [msg.id]: true }
-  session.value = next
+  showSession(next)
   await refresh()
 }
 
-async function stopAgent(): Promise<void> {
-  if (!busy.value) return
-  stopRequested = true
-  const id = session.value?.id
-  if (id) await window.studio?.agentAbort?.(id)
+async function stopAgent(targetId?: string): Promise<void> {
+  const id = targetId ?? session.value?.id
+  if (!id || !runOf(id).busy) return
+  patchRun(id, { stopRequested: true, holdQueue: true })
+  await window.studio?.agentAbort?.(id)
+}
+
+async function stopAllAgents(): Promise<void> {
+  const ids = Object.entries(runs.value)
+    .filter(([, run]) => run.busy)
+    .map(([id]) => id)
+  await Promise.all(ids.map((id) => stopAgent(id)))
 }
 
 async function onComposerSubmit(): Promise<void> {
@@ -636,7 +812,7 @@ async function createSessionFromDialog(payload: {
 }): Promise<void> {
   if (!projectRoot.value || !window.studio?.agentCreateSession) return
   showSessionDialog.value = false
-  session.value = await window.studio.agentCreateSession(
+  const created = await window.studio.agentCreateSession(
     toIpcValue({
       projectRoot: projectRoot.value,
       moduleId: workspace.selectedModuleName ?? 'project',
@@ -644,6 +820,7 @@ async function createSessionFromDialog(payload: {
       permissions: payload.permissions
     })
   )
+  if (created) showSession(created)
   await refresh()
 }
 
@@ -653,9 +830,12 @@ async function launchFromBootstrap(req: HybridAgentBootstrapPayload): Promise<vo
   launchInFlight = true
   error.value = ''
   showArchived.value = false
+  const rootAtStart = projectRoot.value
+  const gen = projectGen
+  let launchedId = ''
   let launchOpenedAgent = false
   try {
-    if (!projectRoot.value || !window.studio?.agentCreateSession) {
+    if (!rootAtStart || !window.studio?.agentCreateSession) {
       error.value = t('informal.startGenerateFailed')
       return
     }
@@ -663,9 +843,9 @@ async function launchFromBootstrap(req: HybridAgentBootstrapPayload): Promise<vo
       const status = await window.studio.llmStatus?.()
       configured.value = status?.configured ?? false
     }
-    session.value = await window.studio.agentCreateSession(
+    const created = await window.studio.agentCreateSession(
       toIpcValue({
-        projectRoot: projectRoot.value,
+        projectRoot: rootAtStart,
         moduleId: workspace.selectedModuleName ?? 'project',
         title: req.title,
         skillId: req.skillId,
@@ -673,52 +853,62 @@ async function launchFromBootstrap(req: HybridAgentBootstrapPayload): Promise<vo
         promptExtras: req.promptExtras
       })
     )
+    if (!created || gen !== projectGen) return
+    launchedId = created.id
+    showSession(created)
     await refresh()
     if (!configured.value) {
       error.value = t('agent.missingKey')
       return
     }
-    stopRequested = false
     pinThreadToBottom = true
-    turnInFlight = true
-    busy.value = true
-    agentCalls += 1
     launchOpenedAgent = true
-    session.value = await window.studio.agentChat(
+    const context = {
+      ...ctxFor(created),
+      skillId: req.skillId,
+      permissions: req.permissions,
+      promptExtras: req.promptExtras
+    }
+    beginCall(launchedId, { turn: true, clearStop: true })
+    const next = await window.studio.agentChat(
       toIpcValue({
-        projectRoot: projectRoot.value,
-        sessionId: session.value.id,
+        projectRoot: rootAtStart,
+        sessionId: launchedId,
         text: req.initialUserMessage,
-        context: {
-          ...ctx(),
-          skillId: req.skillId,
-          permissions: req.permissions,
-          promptExtras: req.promptExtras
-        }
+        context
       })
     )
+    if (!stillOnProject(rootAtStart) || gen !== projectGen) return
+    if (next) publishSession(next)
     await refresh()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    if (gen === projectGen) error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    if (launchOpenedAgent) agentCalls -= 1
     launchInFlight = false
-    busy.value = false
-    if (!stopRequested) await maybeAutoApply()
-    turnInFlight = false
-    await nextTick()
-    thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'smooth' })
-    const queuedLaunch = consumeAgentLaunchPending()
-    if (queuedLaunch) void launchFromBootstrap(queuedLaunch)
-    else if (!stopRequested) await flushQueue()
+    if (launchOpenedAgent && launchedId && gen === projectGen) {
+      await finishCall(launchedId, rootAtStart, gen, { releaseTurn: true })
+    }
+    if (gen === projectGen && stillOnProject(rootAtStart)) {
+      const queuedLaunch = consumeAgentLaunchPending()
+      if (queuedLaunch) void launchFromBootstrap(queuedLaunch)
+    }
   }
 }
 
 async function openSession(id: string): Promise<void> {
+  const seq = ++openSeq
+  cancelQueueEdit()
+  const live = liveSessions.get(id)
+  if (live && runOf(id).busy) {
+    session.value = live
+    return
+  }
   if (!window.studio?.agentLoadSession) return
-  session.value = await window.studio.agentLoadSession(
+  const loaded = await window.studio.agentLoadSession(
     toIpcValue({ projectRoot: projectRoot.value, id })
   )
+  if (seq !== openSeq || !loaded) return
+  showSession(loaded)
 }
 
 function startRename(id: string, title: string): void {
@@ -741,7 +931,7 @@ async function commitRename(): Promise<void> {
     })
   )
   renamingId.value = null
-  if (next && session.value?.id === id) session.value = next
+  if (next) publishSession(next)
   await refresh()
 }
 
@@ -758,12 +948,17 @@ async function onMenu(action: MenuAction): Promise<void> {
     const copy = await window.studio?.agentDuplicateSession?.(
       toIpcValue({ projectRoot: projectRoot.value, id })
     )
-    if (copy) session.value = copy
+    if (copy) showSession(copy)
     await refresh()
     return
   }
   if (action === 'delete') {
+    if (runOf(id).busy) {
+      patchRun(id, { stopRequested: true, holdQueue: true })
+      void window.studio?.agentAbort?.(id)
+    }
     await window.studio?.agentDeleteSession?.(toIpcValue({ projectRoot: projectRoot.value, id }))
+    liveSessions.delete(id)
     if (session.value?.id === id) session.value = null
     await refresh()
     return
@@ -802,7 +997,7 @@ function openMenu(e: MouseEvent, id: string): void {
 }
 
 onMounted(() => {
-  workspace.registerAgentAbort(agentSource, stopAgent)
+  workspace.registerAgentAbort(agentSource, stopAllAgents)
   void refresh()
   const closeMenu = () => {
     menu.value = null
@@ -814,21 +1009,23 @@ onMounted(() => {
   })
   const unsub = window.studio?.onAgentDelta?.((payload) => {
     if (payload.kind === 'session' && payload.session) {
-      if (session.value && session.value.id === payload.sessionId) session.value = payload.session
-      void refresh()
-      void scrollThreadIfPinned()
+      publishSession(payload.session)
+      if (session.value?.id === payload.sessionId) queueScroll()
       return
     }
-    if (!session.value || session.value.id !== payload.sessionId || !payload.messageId) return
-    const msg = session.value.messages.find((m) => m.id === payload.messageId)
+    const target = liveSession(payload.sessionId)
+    if (!target || !payload.messageId) return
+    const msg = target.messages.find((m) => m.id === payload.messageId)
     if (!msg) return
     if (payload.kind === 'reasoning') msg.thinking = payload.text
     if (payload.kind === 'content') msg.content = payload.text
     if (payload.kind === 'tool_call' && payload.index != null) {
+      const prevArgs = msg.toolCalls?.[payload.index]?.arguments ?? ''
+      const incoming = payload.arguments ?? ''
       msg.toolCalls = upsertToolCall(msg.toolCalls, payload.index, {
         id: payload.id ?? '',
         name: payload.name ?? '',
-        arguments: payload.arguments ?? '',
+        arguments: incoming.length >= prevArgs.length ? incoming : prevArgs,
         status: payload.status
       })
     }
@@ -840,9 +1037,10 @@ onMounted(() => {
       }
       msg.toolCalls = calls
     }
-    void scrollThreadIfPinned()
+    if (session.value?.id === payload.sessionId) queueScroll()
   })
   onUnmounted(() => {
+    if (scrollFrame) cancelAnimationFrame(scrollFrame)
     document.removeEventListener('mousedown', closeMenu)
     unsubLaunch()
     unsub?.()
@@ -853,16 +1051,25 @@ onMounted(() => {
 })
 
 watch(projectRoot, () => {
-  stopRequested = true
+  projectGen += 1
+  openSeq += 1
+  const ids = Object.entries(runs.value)
+    .filter(([, run]) => run.busy)
+    .map(([id]) => id)
+  for (const id of ids) {
+    patchRun(id, { stopRequested: true, holdQueue: true })
+    void window.studio?.agentAbort?.(id)
+  }
   session.value = null
-  queuedMessages.value = []
+  runs.value = {}
+  liveSessions.clear()
   editingQueueId.value = null
   queueEditDraft.value = ''
   input.value = ''
   void refresh()
 })
 
-watch(busy, (v) => workspace.setAgentBusy(agentSource, v), { immediate: true })
+watch(anyBusy, (value) => workspace.setAgentBusy(agentSource, value), { immediate: true })
 
 function permBadge(s: AgentSessionPayload): string {
   const p = s.context.permissions
@@ -916,6 +1123,11 @@ function permBadge(s: AgentSessionPayload): string {
               @dblclick.stop="startRename(s.id, s.title)"
             >
               <span v-if="s.pinned" class="mr-1 text-[10px] text-content-muted">📌</span>
+              <span
+                v-if="sessionIsBusy(s.id)"
+                class="mr-1 inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent"
+                :title="t('agent.working')"
+              />
               <input
                 v-if="renamingId === s.id"
                 v-model="renameDraft"
@@ -973,8 +1185,12 @@ function permBadge(s: AgentSessionPayload): string {
                 :message-streaming="Boolean(msg.streaming)"
                 :busy="busy"
               />
+              <p
+                v-if="msg.content && msg.role === 'assistant' && msg.streaming"
+                class="cursor-text whitespace-pre-wrap"
+              >{{ msg.content }}</p>
               <AgentMarkdownPreview
-                v-if="msg.content && msg.role === 'assistant'"
+                v-else-if="msg.content && msg.role === 'assistant'"
                 :markdown="msg.content"
               />
               <textarea
@@ -1107,6 +1323,18 @@ function permBadge(s: AgentSessionPayload): string {
                 @click="startQueueEdit(item)"
               >
                 {{ item.text }}
+              </button>
+              <button
+                v-if="editingQueueId !== item.id"
+                type="button"
+                class="rounded p-0.5 text-content-muted hover:bg-surface-overlay hover:text-content-primary disabled:pointer-events-none disabled:opacity-30"
+                :class="busy ? 'opacity-0 group-hover/queue:opacity-100' : 'opacity-100'"
+                :title="t('agent.queueSend')"
+                :aria-label="t('agent.queueSend')"
+                :disabled="busy"
+                @click="sendQueued(item.id)"
+              >
+                <StudioIcon icon="lucide:send-horizontal" :size="12" />
               </button>
               <button
                 v-if="editingQueueId !== item.id"

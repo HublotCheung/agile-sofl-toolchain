@@ -63,7 +63,7 @@ export function initMonacoBase(): void {
     tokenizer: {
       root: [
         [/^---$/, 'delimiter.yaml', '@frontmatter'],
-        [/^#{1,6}\s.*$/, 'keyword'],
+        [/^#+\s.*$/, 'keyword'],
         [/<!--.*?-->/, 'comment'],
         [/^[\s]*[-*]\s/, 'markup'],
         [/^aspecVersion:.+$/, 'keyword'],

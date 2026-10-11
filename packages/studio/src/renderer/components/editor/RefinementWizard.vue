@@ -164,7 +164,8 @@ watch(
       await loadPreview()
       await ensureDiffEditor()
     }
-  }
+  },
+  { immediate: true }
 )
 
 watch([preview, targetMode, preserveExisting, skeletonOnly, mergePlans], () => syncDiffModels(), { deep: true })

@@ -1,5 +1,6 @@
 import {
   ALLOWED_ATTRS,
+  LOGIC_EVENT_ATTRS,
   VOID_TAGS,
   escapeAttr,
   escapeText,
@@ -30,6 +31,11 @@ function parseAttrs(raw: string): Record<string, string> {
   const attrs: Record<string, string> = {}
   raw.replace(ATTR_RE, (_m, name: string, dq?: string, sq?: string, bare?: string) => {
     const key = String(name).toLowerCase()
+    if (LOGIC_EVENT_ATTRS.has(key)) {
+      const handler = decodeEntities(dq ?? sq ?? bare ?? '')
+      if (handler && !/javascript\s*:/i.test(handler)) attrs[key] = handler
+      return ''
+    }
     if (key.startsWith('on') || key === 'style' || key === 'src' || key === 'href') return ''
     if (!ALLOWED_ATTRS.has(key)) return ''
     const value = decodeEntities(dq ?? sq ?? bare ?? '')
@@ -47,12 +53,41 @@ function parseAttrs(raw: string): Record<string, string> {
   return attrs
 }
 
+function liftLogicScripts(source: string): { html: string; scripts: string[] } {
+  const scripts: string[] = []
+  const lifted = source.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (_full, attrs: string, body: string) => {
+    if (/\bsrc\s*=/i.test(attrs)) return ''
+    const code = String(body).replace(/^\n/, '').replace(/\s+$/, '')
+    if (!code.trim()) return ''
+    const index = scripts.length
+    scripts.push(code)
+    return `<script data-as-slot="${index}"></script>`
+  })
+  return { html: stripUnclosedScript(lifted), scripts }
+}
+
+function stripUnclosedScript(source: string): string {
+  const re = /<script\b[^>]*>/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(source))) {
+    const rest = source.slice(match.index + match[0].length)
+    if (!/<\/script>/i.test(rest)) return source.slice(0, match.index)
+  }
+  return source
+}
+
+function unwrapFence(source: string): string {
+  const fenced = /^```(?:html)?\s*\n?([\s\S]*?)\n?```\s*$/i.exec(source.trim())
+  return fenced?.[1] ?? source
+}
+
 export function parseHtmlFragment(source: string): HtmlNode {
   const root: HtmlNode = { type: 'element', tag: '#root', attrs: {}, children: [] }
   const stack: HtmlNode[] = [root]
   TAG_RE.lastIndex = 0
   let match: RegExpExecArray | null
-  const text = source.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<style[\s\S]*?<\/style>/gi, '')
+  const lifted = liftLogicScripts(unwrapFence(source))
+  const text = lifted.html.replace(/<style[\s\S]*?<\/style>/gi, '')
   const re = /<!--[\s\S]*?-->|<\/?([a-zA-Z][\w:-]*)([^>]*)\/?>|([^<]+)/g
   while ((match = re.exec(text))) {
     if (match[0].startsWith('<!--')) continue
@@ -75,6 +110,19 @@ export function parseHtmlFragment(source: string): HtmlNode {
       continue
     }
     if (!isAllowedTag(tag)) continue
+    if (tag === 'script') {
+      const slot = /data-as-slot\s*=\s*"(\d+)"/.exec(match[2] ?? '')
+      const code = slot ? lifted.scripts[Number(slot[1])] ?? '' : ''
+      if (code.trim()) {
+        stack[stack.length - 1]!.children.push({
+          type: 'element',
+          tag: 'script',
+          attrs: { type: 'text/as-logic' },
+          children: [{ type: 'text', attrs: {}, children: [], text: code }]
+        })
+      }
+      continue
+    }
     const node: HtmlNode = { type: 'element', tag, attrs: parseAttrs(match[2] ?? ''), children: [] }
     stack[stack.length - 1]!.children.push(node)
     if (!selfClosing && !VOID_TAGS.has(tag)) stack.push(node)
@@ -84,13 +132,18 @@ export function parseHtmlFragment(source: string): HtmlNode {
 
 export function serializeHtml(node: HtmlNode, indent = 0): string {
   if (node.type === 'text') return escapeText(node.text ?? '')
+  const pad = '  '.repeat(indent)
+  if (node.tag === 'script') {
+    const body = node.children.map((child) => child.text ?? '').join('')
+    const safe = body.replace(/<\/script/gi, '<\\/script')
+    return `${pad}<script type="text/as-logic">${safe}</script>`
+  }
   if (node.tag === '#root') {
     return node.children
       .map((child) => serializeHtml(child, indent))
       .filter((s) => s.trim().length > 0)
       .join('\n') + (node.children.length ? '\n' : '')
   }
-  const pad = '  '.repeat(indent)
   const attrText = Object.entries(node.attrs)
     .filter(([, v]) => v !== '')
     .map(([k, v]) => (v === '' || v === k ? k : `${k}="${escapeAttr(v)}"`))

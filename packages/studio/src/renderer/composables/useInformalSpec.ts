@@ -59,12 +59,15 @@ export function useInformalSpec(tabId: Ref<string | undefined>) {
     }
   }
 
+  let sawContent = false
   watch(
     () => tab.value?.content,
     (content) => {
       if (content == null || content === last) return
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => void rebuild(), 280)
+      const delay = sawContent ? 280 : 450
+      sawContent = true
+      timer = setTimeout(() => void rebuild(), delay)
     },
     { immediate: true }
   )
@@ -144,7 +147,7 @@ export function useInformalSpec(tabId: Ref<string | undefined>) {
     if (!title) return null
     const lines = current.content.split(/\r?\n/)
     const headingIdx = lines.findIndex((line) => {
-      const heading = line.match(/^#{1,6}\s+(.+?)\s*$/)
+      const heading = line.match(/^#+\s+(.+?)\s*$/)
       if (!heading) return false
       const text = heading[1]!.replace(/<!--\s*@id:[^>]+-->/gi, '').trim()
       return text === title || line.includes(id)

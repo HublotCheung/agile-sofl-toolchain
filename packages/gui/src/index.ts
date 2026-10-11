@@ -69,6 +69,7 @@ export {
 } from './scenarioEval.js'
 export type { ScenarioCandidate, ScenarioMatchResult, EvalValue } from './scenarioEval.js'
 export { prototypeStylesheet } from './stylesheet.js'
+export { buildPrototypeSrcdoc, GUI_IFRAME_SANDBOX, GUI_SANDBOX_CHANNEL } from './prototypeDoc.js'
 export {
   ALLOWED_TAGS,
   ALLOWED_CLASSES,

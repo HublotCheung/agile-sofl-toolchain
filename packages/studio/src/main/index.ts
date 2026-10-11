@@ -7,6 +7,7 @@ import { app, ipcMain, BrowserWindow } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerFileHandlers } from './services/fileService'
+import { registerTextSearchHandlers } from './services/textSearchService'
 import { registerWindowHandlers } from './services/windowService'
 import { registerParseHandlers } from './services/parseService'
 import { registerAgentHandlers } from './services/llm/register'
@@ -25,6 +26,10 @@ import {
 
 let mainWindow: BrowserWindow | null = null
 let allowClose = false
+let resolveBackendReady: () => void = () => {}
+const backendReady = new Promise<void>((resolve) => {
+  resolveBackendReady = resolve
+})
 
 function resolveAppIcon(): string | undefined {
   const candidates = [
@@ -81,7 +86,9 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.once('did-finish-load', () => {
-    startLanguageServer()
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) startLanguageServer()
+    }, 2000)
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -96,22 +103,12 @@ app.whenReady().then(async () => {
   // experiment condition at startup (project-level experiment.json is re-read per agent session)
   console.warn(conditionNotice(getExperimentConfig()))
   registerFileHandlers(getWindow)
+  registerTextSearchHandlers()
   registerWindowHandlers(getWindow)
   registerProjectHandlers(getWindow)
   registerAgentHandlers()
   registerGitHandlers()
-
-  try {
-    await initProjectIndex()
-  } catch (err) {
-    console.error('[studio] Failed to open project index:', err)
-  }
-
-  try {
-    registerParseHandlers()
-  } catch (err) {
-    console.error('[studio] Failed to register parse handlers:', err)
-  }
+  ipcMain.handle('studio:backend-ready', () => backendReady)
 
   ipcMain.on('studio:lsp-send', (_event, jsonBody: string) => {
     sendToLanguageServer(jsonBody)
@@ -141,6 +138,23 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+
+  setTimeout(() => {
+    void (async () => {
+      try {
+        await initProjectIndex()
+      } catch (err) {
+        console.error('[studio] Failed to open project index:', err)
+      }
+      try {
+        registerParseHandlers()
+      } catch (err) {
+        console.error('[studio] Failed to register parse handlers:', err)
+      } finally {
+        resolveBackendReady()
+      }
+    })()
+  }, 0)
 })
 
 app.on('window-all-closed', () => {

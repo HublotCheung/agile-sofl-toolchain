@@ -22,6 +22,7 @@ export function useGuiModel(
   const loading = ref(false)
   const lastRebuiltContent = ref('')
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let guiPrimed = false
 
   const embedded = computed(() => options?.embeddedInAspec?.value ?? false)
 
@@ -81,7 +82,9 @@ export function useGuiModel(
 
   function scheduleRebuild(): void {
     if (debounceTimer) clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(() => void rebuildNow(), DEBOUNCE_MS)
+    const delay = guiPrimed ? DEBOUNCE_MS : 1100
+    guiPrimed = true
+    debounceTimer = setTimeout(() => void rebuildNow(), delay)
   }
 
   watch(
@@ -94,7 +97,10 @@ export function useGuiModel(
     { immediate: true }
   )
 
-  watch(activeTabId, () => void rebuildNow())
+  watch(activeTabId, (_id, prev) => {
+    if (prev == null) return
+    void rebuildNow()
+  })
 
   function applySourcePatch(next: string): void {
     const tab = activeTab.value

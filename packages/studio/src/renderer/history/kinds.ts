@@ -8,7 +8,8 @@ export const HistoryKinds = {
   guiEdit: 'gui-edit',
   moduleAdd: 'module-add',
   moduleRename: 'module-rename',
-  moduleDelete: 'module-delete'
+  moduleDelete: 'module-delete',
+  searchReplace: 'search-replace'
 } as const
 
 export type HistoryKind = (typeof HistoryKinds)[keyof typeof HistoryKinds]
@@ -47,7 +48,8 @@ const builtins: HistoryKindDefinition[] = [
   { id: HistoryKinds.guiEdit, labelKey: 'history.kind.guiEdit' },
   { id: HistoryKinds.moduleAdd, labelKey: 'history.kind.moduleAdd', affectsWorkspace: true },
   { id: HistoryKinds.moduleRename, labelKey: 'history.kind.moduleRename', affectsWorkspace: true },
-  { id: HistoryKinds.moduleDelete, labelKey: 'history.kind.moduleDelete', affectsWorkspace: true }
+  { id: HistoryKinds.moduleDelete, labelKey: 'history.kind.moduleDelete', affectsWorkspace: true },
+  { id: HistoryKinds.searchReplace, labelKey: 'history.kind.searchReplace' }
 ]
 
 for (const def of builtins) registerHistoryKind(def)

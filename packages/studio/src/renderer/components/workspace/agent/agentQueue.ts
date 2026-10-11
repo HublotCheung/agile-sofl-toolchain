@@ -47,3 +47,34 @@ export function shiftQueuedMessage(queue: AgentQueuedMessage[]): {
   const [next, ...rest] = queue
   return { next, rest }
 }
+
+export function takeQueuedMessage(
+  queue: AgentQueuedMessage[],
+  id: string
+): { item: AgentQueuedMessage | null; rest: AgentQueuedMessage[] } {
+  const item = queue.find((entry) => entry.id === id) ?? null
+  if (!item) return { item: null, rest: queue }
+  return { item, rest: queue.filter((entry) => entry.id !== id) }
+}
+
+/** Pending tool work or a live stream means this turn will still produce output. */
+export function sessionStillRunning(session: {
+  context?: { pendingToolCallId?: string }
+  messages?: Array<{ pending?: boolean; streaming?: boolean }>
+} | null | undefined): boolean {
+  if (!session) return false
+  if (session.context?.pendingToolCallId) return true
+  return Boolean(session.messages?.some((message) => message.pending || message.streaming))
+}
+
+/**
+ * Auto-send only after this session's agent has fully stopped.
+ * A user interrupt keeps the queue for a manual send.
+ */
+export function shouldAutoFlushQueue(state: {
+  busy: boolean
+  interrupted: boolean
+  stillRunning: boolean
+}): boolean {
+  return !state.busy && !state.interrupted && !state.stillRunning
+}

@@ -64,6 +64,7 @@ export type InformalPatchOp =
       id: string
       parentId: string | InformalSectionType
       afterId?: string
+      beforeId?: string
     }
 
 export interface InformalPatch {

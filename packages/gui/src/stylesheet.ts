@@ -2,14 +2,17 @@
 
 export function prototypeStylesheet(vars: Record<string, string> = {}): string {
   const v = (name: string, fallback: string) => vars[name] ?? fallback
-  return `:host {
+  return `html, body, :host {
   display: block;
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  min-height: 100%;
+  margin: 0;
 }
+html, body { height: 100%; overflow: auto; }
 *, *::before, *::after { box-sizing: border-box; }
-:host, .as-app {
+html, body, :host, .as-app {
   --as-bg: ${v('--gui-canvas', v('--surface-base', '#eef1f4'))};
   --as-raised: ${v('--gui-surface-card', v('--surface-raised', '#fff'))};
   --as-ink: ${v('--gui-ink', v('--text-primary', '#15202b'))};

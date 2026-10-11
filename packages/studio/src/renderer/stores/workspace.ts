@@ -11,6 +11,7 @@ import { useDocumentStore } from './document'
 import { dirtyModuleNames } from '../lib/moduleDirty'
 import type { TreeSelection } from '../composables/useVisualModel'
 import { fileBelongsToRoot, filePathsEqual } from './tabUtils'
+import { type EditorDocumentKind } from '../../shared/textSearch'
 import { refreshGitFor } from '../composables/useGitStatus'
 import { consumeAgentLaunchPending, emitAgentLaunch } from '../lib/agentLaunchBus'
 import { useModalStore } from './modal'
@@ -21,6 +22,16 @@ const DEFAULT_COLUMN_WIDTHS = [0.18, 0.6, 0.22]
 
 export type WorkspacePanelId = 'tree' | 'informal' | 'agent' | 'hybrid' | 'gui' | 'structure'
 export type StructureMode = 'tree' | SpecMapKind
+
+export type EditorRevealRequest = {
+  filePath: string
+  kind: EditorDocumentKind
+  start: number
+  end: number
+  line: number
+  column: number
+  text: string
+}
 
 function readStoredView<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   if (typeof localStorage === 'undefined') return fallback
@@ -54,6 +65,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const structureSplitRatio = ref(0.5)
   const informalRevealNonce = ref(0)
   const hybridRevealNonce = ref(0)
+  const editorRevealNonce = ref(0)
+  const editorReveal = ref<EditorRevealRequest | null>(null)
   const informalGraphBodyVisible = ref(true)
   const savedModuleHashes = ref<Record<string, Record<string, string>>>({})
   const currentModuleHashes = ref<Record<string, Record<string, string>>>({})
@@ -277,6 +290,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (file.kind === 'manifest') continue
       const result = await window.studio!.fileRead(file.path)
       doc.openFromFile(result.filePath, result.content, result.title)
+      await new Promise((resolve) => setTimeout(resolve, 0))
     }
     const saved: Record<string, Record<string, string>> = {}
     for (const file of payload.files.filter((f) => f.kind === 'asfl')) {
@@ -447,6 +461,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     hybridRevealNonce.value += 1
   }
 
+  function revealEditorMatch(request: EditorRevealRequest): void {
+    editorReveal.value = request
+    editorRevealNonce.value += 1
+    if (request.kind === 'aspec') {
+      informalViewMode.value = 'document'
+      setFocusedPanel('informal')
+      return
+    }
+    if (request.kind === 'asfl') {
+      hybridMode.value = 'code'
+      const mod = modules.value.find((item) => filePathsEqual(item.filePath, request.filePath))
+      if (mod) selectModule(mod.name)
+      setFocusedPanel('hybrid')
+      return
+    }
+    guiMode.value = 'code'
+    setFocusedPanel('gui')
+  }
+
   function revealGuiScreen(id: string): void {
     guiRevealScreenId.value = id
     guiMode.value = 'visual'
@@ -580,6 +613,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     structureSplitRatio,
     informalRevealNonce,
     hybridRevealNonce,
+    editorRevealNonce,
+    editorReveal,
+    revealEditorMatch,
     guiRevealNonce,
     guiRevealScreenId,
     informalGraphBodyVisible,

@@ -54,6 +54,8 @@ const zoomOptions = computed(() => [
 
 const languageOptions = computed(() => [
   { id: 'zh-CN', label: t('settings.languageZh') },
+  { id: 'zh-TW', label: t('settings.languageZhTW') },
+  { id: 'ja', label: t('settings.languageJa') },
   { id: 'en', label: t('settings.languageEn') }
 ])
 
@@ -81,7 +83,11 @@ const accentOptions = computed(() => [
 
 const selectedProfile = computed(() => profiles.value.find((p) => p.id === selectedId.value) ?? null)
 
-const currentLocale = computed(() => (String(locale.value).startsWith('zh') ? 'zh-CN' : 'en'))
+const currentLocale = computed(() => {
+  const id = String(locale.value)
+  if (id === 'zh-CN' || id === 'zh-TW' || id === 'ja' || id === 'en') return id
+  return 'en'
+})
 
 const navItems = computed(() => [
   { id: 'appearance' as const, label: t('settings.appearance') },
@@ -118,7 +124,7 @@ function onZoom(id: string): void {
 }
 
 function onLanguage(id: string): void {
-  if (id === 'zh-CN' || id === 'en') settings.setLanguage(id as Locale)
+  if (id === 'zh-CN' || id === 'zh-TW' || id === 'ja' || id === 'en') settings.setLanguage(id as Locale)
 }
 
 function onInformal(id: string): void {

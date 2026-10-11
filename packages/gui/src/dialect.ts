@@ -63,7 +63,8 @@ export const ALLOWED_TAGS = new Set([
   'progress',
   'meter',
   'details',
-  'summary'
+  'summary',
+  'script'
 ])
 
 export const VOID_TAGS = new Set(['input', 'hr', 'img', 'br'])
@@ -167,6 +168,15 @@ export const ALLOWED_CLASSES = new Set([
   'as-center',
   'is-hidden',
   'is-active'
+])
+
+/** Inline handlers the prototype may run inside the sandbox iframe. */
+export const LOGIC_EVENT_ATTRS = new Set([
+  'onclick',
+  'oninput',
+  'onchange',
+  'onmouseenter',
+  'onmouseleave'
 ])
 
 export const DATA_ATTRS = [

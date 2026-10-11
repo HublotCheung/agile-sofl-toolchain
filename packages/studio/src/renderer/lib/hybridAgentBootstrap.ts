@@ -11,7 +11,7 @@ const DETAIL_HINTS: Record<0 | 1 | 2 | 3 | 4, { zh: string; en: string }> = {
 export function buildClientHybridAgentBootstrap(
   params: HybridGenerateParamsPayload
 ): HybridAgentBootstrapPayload {
-  const zh = params.locale !== 'en'
+  const zh = params.locale === 'zh-CN' || params.locale === 'zh-TW'
   const s = params.stages
   const detail = DETAIL_HINTS[params.detailLevel]
   const extras = [

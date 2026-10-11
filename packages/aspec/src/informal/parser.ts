@@ -24,7 +24,7 @@ import {
 } from './schema.js'
 
 const ID_COMMENT = /<!--\s*@id:([^>]+?)\s*-->/i
-const HEADING = /^(#{1,6})\s+(.+?)\s*$/
+const HEADING = /^(#+)\s+(.+?)\s*$/
 
 interface HeadingBlock {
   level: number

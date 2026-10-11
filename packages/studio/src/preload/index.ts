@@ -30,6 +30,7 @@ const studio = {
   isMaximized: () => ipcRenderer.invoke('studio:window-is-maximized') as Promise<boolean>,
   getPlatform: () => ipcRenderer.invoke('studio:app-get-platform') as Promise<string>,
   getLocale: () => ipcRenderer.invoke('studio:app-get-locale') as Promise<string>,
+  whenBackendReady: () => ipcRenderer.invoke('studio:backend-ready') as Promise<void>,
   openDevTools: () => ipcRenderer.invoke('studio:open-devtools') as Promise<void>,
   onMaximizedChanged: (cb: (maximized: boolean) => void) => {
     const handler = (_: unknown, maximized: boolean) => cb(maximized)
@@ -139,6 +140,10 @@ const studio = {
       }>
     >
   ,
+  searchProjectText: (payload: import('../shared/textSearch').TextSearchRequest) =>
+    ipcRenderer.invoke('studio:search-project-text', payload) as Promise<
+      import('../shared/textSearch').TextSearchResponse
+    >,
   openProjectFolder: () => ipcRenderer.invoke('studio:open-project-folder') as Promise<string | null>,
   revealInFolder: (filePath: string) =>
     ipcRenderer.invoke('studio:reveal-in-folder', filePath) as Promise<void>,
@@ -302,7 +307,7 @@ const studio = {
     sessionId: string
     text: string
     context: AgentTurnContextPayload
-  }) => ipcRenderer.invoke('studio:agent-chat', JSON.parse(JSON.stringify(payload))) as Promise<AgentSessionPayload>,
+  }) => ipcRenderer.invoke('studio:agent-chat', payload) as Promise<AgentSessionPayload>,
   agentResume: (payload: {
     projectRoot: string
     sessionId: string
@@ -311,7 +316,7 @@ const studio = {
     context: AgentTurnContextPayload
     continueTurn?: boolean
   }) =>
-    ipcRenderer.invoke('studio:agent-resume', JSON.parse(JSON.stringify(payload))) as Promise<AgentSessionPayload | null>,
+    ipcRenderer.invoke('studio:agent-resume', payload) as Promise<AgentSessionPayload | null>,
   agentAbort: (sessionId: string) =>
     ipcRenderer.invoke('studio:agent-abort', sessionId) as Promise<{ ok: boolean }>,
   onAgentDelta: (
@@ -820,7 +825,7 @@ export type HybridGenerateParamsPayload = {
   strategy: 'ask' | 'merge' | 'rebuild'
   inferUnstatedDesign: boolean
   moduleSplit: 'ask' | 'single-system' | 'cluster-by-function'
-  locale?: 'zh-CN' | 'en'
+  locale?: 'zh-CN' | 'zh-TW' | 'ja' | 'en'
 }
 
 export type HybridAgentBootstrapPayload = {

@@ -9,6 +9,7 @@ import {
 } from '../../../lib/atomicityTree'
 import { buildRefineAgentBootstrap, refineToolsForRow, type RefineAiToolId } from '../../../lib/refineAgentTools'
 import { emptyRefinementState, type RefinementStateDto } from '../../../lib/refinementTypes'
+import type { Locale } from '../../../i18n'
 import { useWorkspaceStore } from '../../../stores/workspace'
 import StudioIcon from '../../ui/StudioIcon.vue'
 import RefinementProgressChart from './RefinementProgressChart.vue'
@@ -120,8 +121,7 @@ function closeMenu(): void {
 
 function pickTool(tool: RefineAiToolId): void {
   if (!menu.value) return
-  const loc = locale.value === 'en' ? 'en' : 'zh-CN'
-  workspace.requestAgentLaunch(buildRefineAgentBootstrap(tool, menu.value.row, loc))
+  workspace.requestAgentLaunch(buildRefineAgentBootstrap(tool, menu.value.row, locale.value as Locale))
   menu.value = null
 }
 

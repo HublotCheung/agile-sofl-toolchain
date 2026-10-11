@@ -1,14 +1,14 @@
 import { initMonacoNlsFromStudioLocale } from './monaco/nls'
-import { i18n } from './i18n'
-
-const savedLocale = (localStorage.getItem('studio-locale') as 'en' | 'zh-CN' | null) ?? 'zh-CN'
-initMonacoNlsFromStudioLocale(savedLocale)
-
+import { i18n, isStudioLocale, type Locale } from './i18n'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import './styles/main.css'
 import { registerStudioIcons } from './icons/registerStudioIcons'
+
+const rawLocale = localStorage.getItem('studio-locale')
+const savedLocale: Locale = rawLocale && isStudioLocale(rawLocale) ? rawLocale : 'zh-CN'
+initMonacoNlsFromStudioLocale(savedLocale)
 
 registerStudioIcons()
 

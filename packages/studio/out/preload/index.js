@@ -7,6 +7,7 @@ const studio = {
   isMaximized: () => electron.ipcRenderer.invoke("studio:window-is-maximized"),
   getPlatform: () => electron.ipcRenderer.invoke("studio:app-get-platform"),
   getLocale: () => electron.ipcRenderer.invoke("studio:app-get-locale"),
+  whenBackendReady: () => electron.ipcRenderer.invoke("studio:backend-ready"),
   openDevTools: () => electron.ipcRenderer.invoke("studio:open-devtools"),
   onMaximizedChanged: (cb) => {
     const handler = (_, maximized) => cb(maximized);
@@ -115,8 +116,8 @@ const studio = {
   agentForkSession: (payload) => electron.ipcRenderer.invoke("studio:agent-fork-session", payload),
   agentRewindSession: (payload) => electron.ipcRenderer.invoke("studio:agent-rewind-session", payload),
   agentFlagSession: (payload) => electron.ipcRenderer.invoke("studio:agent-flag-session", payload),
-  agentChat: (payload) => electron.ipcRenderer.invoke("studio:agent-chat", JSON.parse(JSON.stringify(payload))),
-  agentResume: (payload) => electron.ipcRenderer.invoke("studio:agent-resume", JSON.parse(JSON.stringify(payload))),
+  agentChat: (payload) => electron.ipcRenderer.invoke("studio:agent-chat", payload),
+  agentResume: (payload) => electron.ipcRenderer.invoke("studio:agent-resume", payload),
   agentAbort: (sessionId) => electron.ipcRenderer.invoke("studio:agent-abort", sessionId),
   onAgentDelta: (cb) => {
     const handler = (_, payload) => cb(payload);
@@ -127,6 +128,7 @@ const studio = {
   generateHybrid: (payload) => electron.ipcRenderer.invoke("studio:generate-hybrid", JSON.parse(JSON.stringify(payload))),
   hybridInventory: (source) => electron.ipcRenderer.invoke("studio:hybrid-inventory", source),
   patchHybridSpec: (payload) => electron.ipcRenderer.invoke("studio:patch-hybrid-spec", JSON.parse(JSON.stringify(payload))),
+  acceptHybridWrite: (payload) => electron.ipcRenderer.invoke("studio:accept-hybrid-write", payload),
   refinementStep: (payload) => electron.ipcRenderer.invoke("studio:refinement-step", JSON.parse(JSON.stringify(payload))),
   refinementState: (payload) => electron.ipcRenderer.invoke("studio:refinement-state", JSON.parse(JSON.stringify(payload))),
   gitIsRepo: (rootPath) => electron.ipcRenderer.invoke("studio:git-is-repo", rootPath),

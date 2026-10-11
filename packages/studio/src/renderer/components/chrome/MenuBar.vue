@@ -8,6 +8,7 @@ import { useWorkspaceStore } from '../../stores/workspace'
 import { useModalStore } from '../../stores/modal'
 import { useHistoryStore } from '../../stores/history'
 import { useSettingsStore } from '../../stores/settings'
+import { useSidebarViewStore } from '../../stores/sidebarView'
 import { historyCommandTitle } from '../../history/kinds'
 
 const emit = defineEmits<{ edit: [cmd: string]; devTools: []; format: []; refine: [] }>()
@@ -19,6 +20,7 @@ const modal = useModalStore()
 const workspace = useWorkspaceStore()
 const history = useHistoryStore()
 const settings = useSettingsStore()
+const sidebar = useSidebarViewStore()
 
 const accessKeys: Record<string, string> = {
   file: 'f',
@@ -84,6 +86,25 @@ const editItems = computed<MenuItem[]>(() => {
   { id: 'paste', label: t('menu.edit.paste'), shortcut: 'Ctrl+V', action: () => emit('edit', 'paste') },
   { id: 'selectAll', label: t('menu.edit.selectAll'), shortcut: 'Ctrl+A', action: () => emit('edit', 'selectAll') },
   { id: 'sep2', label: '', separator: true },
+  {
+    id: 'findInFiles',
+    label: t('menu.edit.findInFiles'),
+    shortcut: 'Ctrl+Shift+F',
+    action: () => {
+      workspace.setInformalCollapsed(false)
+      void sidebar.openFindInFiles(false)
+    }
+  },
+  {
+    id: 'replaceInFiles',
+    label: t('menu.edit.replaceInFiles'),
+    shortcut: 'Ctrl+Shift+H',
+    action: () => {
+      workspace.setInformalCollapsed(false)
+      void sidebar.openFindInFiles(true)
+    }
+  },
+  { id: 'sep3', label: '', separator: true },
   { id: 'format', label: t('menu.edit.format'), shortcut: 'Shift+Alt+F', action: () => emit('format') }
   ]
 })

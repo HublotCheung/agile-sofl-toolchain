@@ -1,6 +1,5 @@
 import type { DocumentSymbol, SymbolInformation } from 'vscode-languageserver-types'
 import type { CommandCenterContext, CommandCenterItem, CommandCenterProvider } from '../types'
-import { getLanguageClient } from '../../monaco/languageClient'
 import { useLspStore } from '../../stores/lsp'
 import {
   lspRangeToSpan,
@@ -89,6 +88,7 @@ async function queryDocumentSymbols(uri: string, ctx: CommandCenterContext): Pro
   if (!lsp.running) {
     return await queryDocumentSymbolsFallback(uri, ctx)
   }
+  const { getLanguageClient } = await import('../../monaco/languageClient')
   const client = getLanguageClient()
   if (!client) return await queryDocumentSymbolsFallback(uri, ctx)
 
@@ -220,6 +220,7 @@ async function queryWorkspaceSymbols(query: string, ctx: CommandCenterContext): 
   if (!lsp.running) {
     return await queryWorkspaceSymbolsFallback(query, ctx)
   }
+  const { getLanguageClient } = await import('../../monaco/languageClient')
   const client = getLanguageClient()
   if (!client) return await queryWorkspaceSymbolsFallback(query, ctx)
 

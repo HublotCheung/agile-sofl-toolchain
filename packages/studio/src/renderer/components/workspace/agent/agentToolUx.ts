@@ -26,29 +26,62 @@ export function toolLabelKey(name: string): string {
   return AGENT_TOOL_LABEL_KEYS[name] || 'agent.tool.generic'
 }
 
+function utf8ByteLength(value: string): number {
+  let bytes = value.length
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code < 0x80) continue
+    if (code < 0x800) bytes += 1
+    else if (code < 0xd800 || code >= 0xe000) bytes += 2
+    else {
+      bytes += 2
+      i += 1
+    }
+  }
+  return bytes
+}
+
 export function formatToolArgsSize(args: string): string {
-  const n = new TextEncoder().encode(args ?? '').length
+  const n = utf8ByteLength(args ?? '')
   if (n < 1024) return `${n} B`
   return `${(n / 1024).toFixed(1)} KB`
+}
+
+const PARTIAL_ARGS_PARSE_LIMIT = 64 * 1024
+
+function countOpKeys(text: string): number {
+  let count = 0
+  let from = 0
+  while (from < text.length) {
+    const at = text.indexOf('"op"', from)
+    if (at < 0) break
+    count += 1
+    from = at + 4
+    if (count >= 500) break
+  }
+  return count
 }
 
 export function parsePartialToolArgs(raw: string): { view?: string; operationCount?: number } {
   const text = raw?.trim() ?? ''
   if (!text) return {}
-  try {
-    const parsed = JSON.parse(text) as Record<string, unknown>
-    return {
-      view: typeof parsed.view === 'string' ? parsed.view : undefined,
-      operationCount: Array.isArray(parsed.operations) ? parsed.operations.length : undefined
+  if (text.length <= PARTIAL_ARGS_PARSE_LIMIT && text.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>
+      return {
+        view: typeof parsed.view === 'string' ? parsed.view : undefined,
+        operationCount: Array.isArray(parsed.operations) ? parsed.operations.length : undefined
+      }
+    } catch {
+      /* incomplete JSON */
     }
-  } catch {
-    const viewMatch = text.match(/"view"\s*:\s*"([^"]+)"/)
-    const opsIntro = text.match(/"operations"\s*:\s*\[/)
-    const operationCount = opsIntro ? (text.match(/"op"\s*:/g)?.length ?? 0) : undefined
-    return {
-      view: viewMatch?.[1],
-      operationCount
-    }
+  }
+  const head = text.length > 4096 ? text.slice(0, 4096) : text
+  const viewMatch = head.match(/"view"\s*:\s*"([^"]+)"/)
+  const operationCount = text.includes('"operations"') ? countOpKeys(text) : undefined
+  return {
+    view: viewMatch?.[1],
+    operationCount
   }
 }
 

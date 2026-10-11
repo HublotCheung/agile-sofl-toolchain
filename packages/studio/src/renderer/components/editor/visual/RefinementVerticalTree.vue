@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   buildVerticalTreeLayout,
@@ -17,7 +17,19 @@ const pan = ref({ x: 16, y: 16 })
 const scale = ref(1)
 const dragging = ref(false)
 const userMoved = ref(false)
+/** Suppress the click after a pan so it does not extend a text selection. */
+const suppressNextClick = ref(false)
 let dragStart = { x: 0, y: 0, panX: 0, panY: 0 }
+let pointerDown = false
+const PAN_DRAG_THRESHOLD_PX = 4
+
+function clearTextSelection(): void {
+  window.getSelection()?.removeAllRanges()
+}
+
+function pointerTravel(e: PointerEvent): number {
+  return Math.hypot(e.clientX - dragStart.x, e.clientY - dragStart.y)
+}
 
 const layout = computed(() => buildVerticalTreeLayout(props.state ?? emptyRefinementState()))
 
@@ -104,14 +116,26 @@ function onWheel(e: WheelEvent): void {
 
 function onPointerDown(e: PointerEvent): void {
   if (e.button !== 0) return
-  dragging.value = true
+  pointerDown = true
   userMoved.value = true
   dragStart = { x: e.clientX, y: e.clientY, panX: pan.value.x, panY: pan.value.y }
+}
+
+function beginPan(e: PointerEvent): void {
+  if (dragging.value) return
+  dragging.value = true
+  clearTextSelection()
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
 }
 
 function onPointerMove(e: PointerEvent): void {
+  if (!pointerDown) return
+  if (!dragging.value && pointerTravel(e) >= PAN_DRAG_THRESHOLD_PX) {
+    beginPan(e)
+  }
   if (!dragging.value) return
+  e.preventDefault()
+  clearTextSelection()
   pan.value = {
     x: dragStart.panX + (e.clientX - dragStart.x),
     y: dragStart.panY + (e.clientY - dragStart.y)
@@ -119,13 +143,61 @@ function onPointerMove(e: PointerEvent): void {
 }
 
 function onPointerUp(e: PointerEvent): void {
-  if (!dragging.value) return
+  const wasPan = dragging.value
+  pointerDown = false
   dragging.value = false
+  if (wasPan) {
+    suppressNextClick.value = true
+    clearTextSelection()
+  }
   try {
     ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
   } catch {
     /* already released */
   }
+}
+
+function nodeIdFromSelectionNode(node: Node | null): string | null {
+  if (!node) return null
+  const el = node instanceof Element ? node : node.parentElement
+  return el?.closest('[data-vtree-node-id]')?.getAttribute('data-vtree-node-id') ?? null
+}
+
+function guardNodeTextSelection(): void {
+  if (dragging.value) {
+    clearTextSelection()
+    return
+  }
+  const root = containerRef.value
+  const sel = window.getSelection()
+  if (!root || !sel || sel.isCollapsed || sel.rangeCount === 0) return
+  const anchorNode = sel.anchorNode
+  const focusNode = sel.focusNode
+  if (!anchorNode || !focusNode) return
+  const anchorEl = anchorNode instanceof Element ? anchorNode : anchorNode.parentElement
+  const focusEl = focusNode instanceof Element ? focusNode : focusNode.parentElement
+  if (!anchorEl?.isConnected || !focusEl?.isConnected) return
+  if (!root.contains(anchorEl) || !root.contains(focusEl)) return
+  const anchorId = nodeIdFromSelectionNode(anchorNode)
+  const focusId = nodeIdFromSelectionNode(focusNode)
+  if (anchorId && focusId && anchorId !== focusId) clearTextSelection()
+}
+
+function onSelectStart(e: Event): void {
+  const target = e.target
+  if (!(target instanceof Element)) return
+  if (dragging.value) {
+    e.preventDefault()
+    return
+  }
+  if (pointerDown && !target.closest('[data-vtree-node-text]')) e.preventDefault()
+}
+
+function onViewportClick(e: MouseEvent): void {
+  if (!suppressNextClick.value) return
+  suppressNextClick.value = false
+  e.preventDefault()
+  clearTextSelection()
 }
 
 watch(
@@ -142,8 +214,13 @@ watch(containerRef, (el, prev) => {
   if (el && !userMoved.value) void nextTick(fit)
 })
 
+onMounted(() => {
+  document.addEventListener('selectionchange', guardNodeTextSelection)
+})
+
 onUnmounted(() => {
   containerRef.value?.removeEventListener('wheel', onWheel)
+  document.removeEventListener('selectionchange', guardNodeTextSelection)
 })
 </script>
 
@@ -173,15 +250,17 @@ onUnmounted(() => {
     <div
       v-else
       ref="containerRef"
-      class="relative min-h-0 flex-1 overflow-hidden"
+      class="refine-vtree-viewport relative min-h-0 flex-1 overflow-hidden select-none"
       :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
+      @selectstart="onSelectStart"
+      @click.capture="onViewportClick"
     >
       <svg
-        class="absolute left-0 top-0 overflow-visible"
+        class="absolute left-0 top-0 overflow-visible select-none"
         :width="layout.width"
         :height="layout.height"
         :style="{
@@ -194,7 +273,7 @@ onUnmounted(() => {
         <g fill="none" stroke="var(--border-subtle)" stroke-width="1.5">
           <path v-for="(e, i) in layout.edges" :key="`${e.from}-${e.to}-${i}`" :d="edgePath(e.from, e.to)" />
         </g>
-        <g v-for="n in layout.nodes" :key="n.id">
+        <g v-for="n in layout.nodes" :key="n.id" :data-vtree-node-id="n.id">
           <rect
             :x="n.x"
             :y="n.y"
@@ -206,6 +285,8 @@ onUnmounted(() => {
             stroke-width="1.5"
           />
           <text
+            data-vtree-node-text
+            class="select-text"
             :x="n.x + 10"
             :y="n.y + 18"
             fill="var(--text-primary)"
@@ -215,7 +296,14 @@ onUnmounted(() => {
             {{ clip(n.label) }}
             <title>{{ n.label }}</title>
           </text>
-          <text :x="n.x + 10" :y="n.y + 34" fill="var(--text-muted)" font-size="10">
+          <text
+            data-vtree-node-text
+            class="select-text"
+            :x="n.x + 10"
+            :y="n.y + 34"
+            fill="var(--text-muted)"
+            font-size="10"
+          >
             {{ statusLabel(n) ?? n.summary ?? '' }}
           </text>
         </g>

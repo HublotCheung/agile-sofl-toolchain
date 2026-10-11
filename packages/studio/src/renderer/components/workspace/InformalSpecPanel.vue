@@ -10,8 +10,10 @@ import DockPanelChrome from './dock/DockPanelChrome.vue'
 import FullscreenPanel from './FullscreenPanel.vue'
 import { useWorkspaceStore } from '../../stores/workspace'
 import { nestedNodes, useInformalSpec } from '../../composables/useInformalSpec'
+import { childNodeType, locateInformalNode, subtreePatchNode } from '../../lib/informalOutline'
 import { duplicateTitle, nextIndexedTitle } from '../../lib/informalTitles'
-import type { InformalPatchPayload, InformalSpecPayload } from '../../../preload/index'
+import type { InformalPatchPayload } from '../../../preload/index'
+import { filePathsEqual } from '../../stores/tabUtils'
 
 type SectionType = 'functions' | 'data-resources' | 'constraints'
 
@@ -31,38 +33,6 @@ const viewOptions = computed(() => [
   { id: 'document', label: t('informal.documentView') },
   { id: 'graphical', label: t('informal.graphicalView') }
 ])
-
-function findNode(id: string): InformalSpecPayload['sections'][0]['children'][0] | null {
-  if (!spec.value) return null
-  const walk = (nodes: InformalSpecPayload['sections'][0]['children']) => {
-    for (const node of nodes) {
-      if (node.id === id) return node
-      const found = walk(nestedNodes(node))
-      if (found) return found
-    }
-    return null
-  }
-  for (const section of spec.value.sections) {
-    const found = walk(section.children)
-    if (found) return found
-  }
-  return null
-}
-
-function sectionTypeOf(id: string): SectionType | null {
-  if (!spec.value) return null
-  for (const section of spec.value.sections) {
-    const walk = (nodes: InformalSpecPayload['sections'][0]['children']): boolean => {
-      for (const node of nodes) {
-        if (node.id === id) return true
-        if (walk(nestedNodes(node))) return true
-      }
-      return false
-    }
-    if (walk(section.children)) return section.type
-  }
-  return null
-}
 
 function onSelect(id: string): void {
   selectNode(id)
@@ -84,10 +54,32 @@ watch(
   }
 )
 
-async function onMove(id: string, parentId: string, afterId?: string): Promise<void> {
+watch(
+  () => workspace.editorRevealNonce,
+  async () => {
+    const request = workspace.editorReveal
+    if (!request || request.kind !== 'aspec') return
+    const tab = workspace.informalTab
+    if (!tab?.filePath || !filePathsEqual(tab.filePath, request.filePath)) return
+    workspace.informalViewMode = 'document'
+    await nextTick()
+    await nextTick()
+    documentRef.value?.revealSpan(
+      {
+        start: request.start,
+        end: request.end,
+        line: request.line,
+        column: request.column
+      },
+      { text: request.text, select: true }
+    )
+  }
+)
+
+async function onMove(id: string, parentId: string, afterId?: string, beforeId?: string): Promise<void> {
   const section = spec.value?.sections.find((s) => s.id === parentId || s.type === parentId)
   await applyPatch({
-    operations: [{ op: 'move', id, parentId: section?.type ?? parentId, afterId }]
+    operations: [{ op: 'move', id, parentId: section?.type ?? parentId, afterId, beforeId }]
   })
 }
 
@@ -118,21 +110,51 @@ async function onRemove(id: string): Promise<void> {
   if (workspace.informalSelectedNodeId === id) selectNode(null)
 }
 
+function childCopy(section: SectionType, nested: boolean): { type: ReturnType<typeof childNodeType>; prefix: string; description: string } {
+  const type = childNodeType(section, nested)
+  if (type === 'function') {
+    return { type, prefix: t('informal.numberedFunction'), description: t('informal.defaultBodyFunction') }
+  }
+  if (type === 'constraint') {
+    return { type, prefix: t('informal.numberedConstraint'), description: t('informal.defaultBodyConstraint') }
+  }
+  if (type === 'data-field') {
+    return { type, prefix: t('informal.numberedField'), description: t('informal.defaultBodyData') }
+  }
+  return { type, prefix: t('informal.numberedData'), description: t('informal.defaultBodyData') }
+}
+
+async function onAddChild(parentId: string): Promise<void> {
+  const located = locateInformalNode(spec.value, parentId)
+  if (!located) return
+  const draft = childCopy(located.section, true)
+  const title = nextIndexedTitle(nestedNodes(located.node).map((node) => node.title), draft.prefix)
+  const result = await applyPatch({
+    operations: [
+      {
+        op: 'add',
+        target: parentId,
+        node: { type: draft.type, title, description: draft.description }
+      }
+    ]
+  })
+  if (!result.ok) return
+  const created = nestedNodes(locateInformalNode(spec.value, parentId)?.node ?? located.node).find(
+    (node) => node.title === title
+  )
+  if (created) selectNode(created.id)
+}
+
 async function onDuplicate(id: string): Promise<void> {
-  const node = findNode(id)
-  const section = sectionTypeOf(id)
-  if (!node || !section) return
+  const located = locateInformalNode(spec.value, id)
+  if (!located) return
   await applyPatch({
     operations: [
       {
         op: 'add',
-        target: section,
+        target: located.parentId,
         afterId: id,
-        node: {
-          type: node.type,
-          title: duplicateTitle(node.title, t('informal.copySuffix')),
-          description: node.description
-        }
+        node: subtreePatchNode(located.node, duplicateTitle(located.node.title, t('informal.copySuffix')))
       }
     ]
   })
@@ -182,6 +204,7 @@ function onViewMode(id: string): void {
         @select="onSelect"
         @move="onMove"
         @add="onAdd"
+        @add-child="onAddChild"
         @rename="onRename"
         @remove="onRemove"
         @duplicate="onDuplicate"

@@ -16,7 +16,8 @@ export function useKeyboardShortcuts(
   onUndoRedo?: (cmd: 'undo' | 'redo') => boolean | Promise<boolean>,
   commandCenter?: CommandCenterShortcutHandlers,
   onToggleSidebar?: () => void,
-  onOpenSettings?: () => void
+  onOpenSettings?: () => void,
+  onSidebarView?: (mode: 'find' | 'replace' | 'explorer') => void
 ): void {
   const files = useFileActions()
 
@@ -49,6 +50,13 @@ export function useKeyboardShortcuts(
     if (mod && key === 'g') {
       e.preventDefault()
       commandCenter?.openCommandCenter(':')
+      return
+    }
+
+    if (mod && e.shiftKey && !e.altKey && (key === 'f' || key === 'h' || key === 'e')) {
+      e.preventDefault()
+      e.stopPropagation()
+      onSidebarView?.(key === 'f' ? 'find' : key === 'h' ? 'replace' : 'explorer')
       return
     }
 

@@ -106,6 +106,7 @@ export function sectionDef(type: InformalSectionType): InformalSectionDefinition
   return DEFAULT_INFORMAL_SECTIONS.find((s) => s.id === type)!
 }
 
+/** Heading depth is unlimited. H2 is the section child; every deeper heading keeps the grandchild type. */
 export function nodeTypeForLevel(
   section: InformalSectionType,
   headingLevel: number

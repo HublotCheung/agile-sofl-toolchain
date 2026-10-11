@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import StudioIcon from '../../ui/StudioIcon.vue'
 import {
@@ -34,8 +34,18 @@ const headline = computed(() => {
   if (status.value === 'error') return t('agent.toolFailed', { name: friendlyName.value })
   return t('agent.toolDone', { name: friendlyName.value })
 })
+const expanded = ref(false)
 const size = computed(() => formatToolArgsSize(props.call.arguments || ''))
 const parsed = computed(() => parsePartialToolArgs(props.call.arguments || ''))
+const shownArgs = computed(() => {
+  const raw = props.call.arguments || ''
+  if (raw.length <= 12000) return raw
+  return `${raw.slice(0, 12000)}\n…`
+})
+
+function onToggle(event: Event): void {
+  expanded.value = (event.currentTarget as HTMLDetailsElement).open
+}
 const subtitle = computed(() => {
   const bits: string[] = []
   if (parsed.value.view) bits.push(parsed.value.view)
@@ -55,6 +65,7 @@ const icon = computed(() => {
 <template>
   <details
     class="mt-1.5 min-w-0 rounded-lg border border-border-subtle bg-surface-base/70 px-2 py-1.5 text-[12px] text-content-secondary"
+    @toggle="onToggle"
   >
     <summary class="flex cursor-pointer list-none items-center gap-1.5 select-none [&::-webkit-details-marker]:hidden">
       <span
@@ -69,8 +80,8 @@ const icon = computed(() => {
     </summary>
     <p v-if="subtitle" class="mt-1 truncate font-mono text-[10px] text-content-muted">{{ subtitle }}</p>
     <pre
-      v-if="call.arguments"
+      v-if="expanded && shownArgs"
       class="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed studio-scroll"
-    >{{ call.arguments }}<span v-if="status === 'streaming'" class="animate-pulse text-accent">▌</span></pre>
+    >{{ shownArgs }}<span v-if="status === 'streaming'" class="animate-pulse text-accent">▌</span></pre>
   </details>
 </template>

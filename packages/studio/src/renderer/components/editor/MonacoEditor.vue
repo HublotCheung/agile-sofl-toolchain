@@ -297,7 +297,16 @@ function onContentChange(): void {
   }
 }
 
-onMounted(async () => {
+let editorDisposed = false
+
+onMounted(() => {
+  window.setTimeout(() => {
+    if (!editorDisposed) void bootMonaco()
+  }, 32)
+})
+
+async function bootMonaco(): Promise<void> {
+  if (!container.value || editorDisposed) return
   initMonacoBase()
   registerAgileSoflFormatProvider()
   try {
@@ -307,6 +316,7 @@ onMounted(async () => {
     console.error('[studio] TextMate setup failed:', err)
   }
 
+  if (editorDisposed || !container.value) return
   const isDark = document.documentElement.classList.contains('dark')
   if (container.value) {
     editor.value = monaco.editor.create(container.value, {
@@ -346,8 +356,9 @@ onMounted(async () => {
     })
   }
 
+  if (editorDisposed) return
   markerSub = monaco.editor.onDidChangeMarkers(() => updateMarkerDiagnostics())
-})
+}
 
 watch([() => doc.activeTabId, () => props.tabId], () => {
   syncModel()
@@ -386,6 +397,7 @@ watch(
 )
 
 onUnmounted(() => {
+  editorDisposed = true
   resizeObserver?.disconnect()
   resizeObserver = null
   markerSub?.dispose()

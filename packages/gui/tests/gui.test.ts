@@ -19,6 +19,7 @@ import { buildSlimGuiBlockFromHtml } from '../src/asflTrace.js'
 import { evalSimpleCondition, matchScenarios } from '../src/scenarioEval.js'
 import { formatGuiInventory } from '../src/inventory.js'
 import { listHtmlTree } from '../src/html.js'
+import { GUI_IFRAME_SANDBOX, buildPrototypeSrcdoc } from '../src/prototypeDoc.js'
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 
@@ -39,12 +40,32 @@ describe('parseGuiSpec', () => {
     expect(document?.html).toContain('data-screen="HomePage"')
   })
 
-  it('strips script and inline handlers', () => {
+  it('keeps sandbox logic scripts and drops host-breaking markup', () => {
     const { document } = parseGuiSpec(
-      `<div class="as-app" data-app="X"><section class="as-screen" data-screen="A"><button class="as-btn" onclick="alert(1)">Go</button><script>alert(1)</script></section></div>`
+      `<div class="as-app" data-app="X"><section class="as-screen" data-screen="A"><button class="as-btn" onclick="n.textContent = String(+n.textContent + 1)">Go</button><button class="as-btn" onload="location.reload()">No</button><a href="javascript:location.reload()">x</a><script src="https://evil.example/x.js"></script><script type="text/as-logic">
+var n = document.querySelector('[data-bind="out:price"]');
+setInterval(function () { if (n && +n.textContent < 10) n.textContent = (+n.textContent + 0.01).toFixed(2); }, 800);
+</script></section></div>`
     )
-    expect(document?.html).not.toContain('script')
-    expect(document?.html).not.toContain('onclick')
+    expect(document?.html).toContain('type="text/as-logic"')
+    expect(document?.html).toContain('setInterval')
+    expect(document?.html).toContain('onclick=')
+    expect(document?.html).not.toContain('onload')
+    expect(document?.html).not.toContain('javascript:')
+    expect(document?.html).not.toContain('evil.example')
+    expect(document?.html).not.toContain('src=')
+  })
+
+  it('builds a prototype document that cannot navigate the parent', () => {
+    const html = `<div class="as-app" data-app="X"><section class="as-screen" data-screen="A"><span data-bind="out:price">1.00</span><script type="text/as-logic">setInterval(function(){}, 800);</script></section></div>`
+    const doc = buildPrototypeSrcdoc(html, 'body{color:red}', true)
+    expect(GUI_IFRAME_SANDBOX).toBe('allow-scripts')
+    expect(GUI_IFRAME_SANDBOX).not.toMatch(/allow-top-navigation|allow-same-origin|allow-forms|allow-popups/)
+    expect(doc).toContain("default-src 'none'")
+    expect(doc).toContain('setInterval')
+    expect(doc).toContain('preventDefault')
+    expect(doc).toContain('agile-sofl-gui')
+    expect(doc).not.toContain('evil')
   })
 })
 

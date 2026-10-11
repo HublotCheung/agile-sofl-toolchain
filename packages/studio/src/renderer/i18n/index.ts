@@ -1,17 +1,22 @@
 import { createI18n } from 'vue-i18n'
 import { initMonacoNlsFromStudioLocale } from '../monaco/nls'
 import en from './en.json'
+import ja from './ja.json'
 import zhCN from './zh-CN.json'
+import zhTW from './zh-TW.json'
+import { isStudioLocale, systemLocaleToStudio, type Locale } from './localeHelpers'
 
-export type Locale = 'en' | 'zh-CN'
+export type { Locale }
+export { isStudioLocale, localeForMilkdown, localeForZhEnApi, useZhAgentCopy, systemLocaleToStudio } from './localeHelpers'
 
-const saved = localStorage.getItem('studio-locale') as Locale | null
+const rawSaved = localStorage.getItem('studio-locale')
+const saved = rawSaved && isStudioLocale(rawSaved) ? rawSaved : null
 
 export const i18n = createI18n({
   legacy: false,
   locale: saved ?? 'zh-CN',
   fallbackLocale: 'en',
-  messages: { en, 'zh-CN': zhCN }
+  messages: { en, 'zh-CN': zhCN, 'zh-TW': zhTW, ja }
 })
 
 export function setLocale(locale: Locale): void {
@@ -23,9 +28,5 @@ export function setLocale(locale: Locale): void {
 export async function initLocaleFromSystem(): Promise<void> {
   if (saved) return
   const sys = await window.studio?.getLocale()
-  if (sys?.startsWith('zh')) {
-    setLocale('zh-CN')
-  } else {
-    setLocale('en')
-  }
+  setLocale(systemLocaleToStudio(sys))
 }

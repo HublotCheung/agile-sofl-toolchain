@@ -2,7 +2,7 @@ import { specToTree, type InformalSpecification, type InformalTreeNode } from '.
 import { sectionDef } from './schema.js'
 
 function emitNode(node: InformalTreeNode, level: number): string {
-  const heading = `${'#'.repeat(Math.min(6, level))} ${node.title}`
+  const heading = `${'#'.repeat(level)} ${node.title}`
   const parts = [heading]
   if (node.description?.trim()) {
     parts.push('', node.description.trim())

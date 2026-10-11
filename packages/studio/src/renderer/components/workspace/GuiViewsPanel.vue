@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { extractScreenHtml } from '@agile-sofl/gui'
 import { GUI_MODEL_KEY } from '../../composables/guiModelContext'
 import { useWorkspaceStore } from '../../stores/workspace'
+import { filePathsEqual } from '../../stores/tabUtils'
 import { resolveGuiScreenId } from '../../lib/guiNavigate'
 import GuiDesignerCanvas from '../editor/gui/GuiDesignerCanvas.vue'
 import GuiScreenSource from '../editor/gui/GuiScreenSource.vue'
@@ -116,6 +117,22 @@ watch(
   () => {
     const id = workspace.guiRevealScreenId
     if (id) selectScreen(id)
+  }
+)
+
+watch(
+  () => workspace.editorRevealNonce,
+  () => {
+    const request = workspace.editorReveal
+    if (!request || request.kind !== 'guispec') return
+    const tab = workspace.guiTab
+    if (!tab?.filePath || !filePathsEqual(tab.filePath, request.filePath)) return
+    const html = gui.model.value?.html || tab.content
+    const hit = screens.value.find((screen) => {
+      const chunk = extractScreenHtml(html, screen.id) || extractScreenHtml(html, screen.name)
+      return chunk.includes(request.text)
+    })
+    if (hit) selectScreen(hit.id)
   }
 )
 

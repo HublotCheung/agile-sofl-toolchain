@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { defineAsyncComponent, ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import type EditorWorkspaceType from '../components/editor/EditorWorkspace.vue'
 import TitleBar from '../components/chrome/TitleBar.vue'
 import EditorTabs from '../components/editor/EditorTabs.vue'
 import EditorToolbar from '../components/editor/EditorToolbar.vue'
-import EditorWorkspace from '../components/editor/EditorWorkspace.vue'
-import WorkspaceLayout from '../components/workspace/WorkspaceLayout.vue'
 import SidebarResizeSplit from '../components/ui/SidebarResizeSplit.vue'
 import ProjectSidebar from '../components/chrome/project/ProjectSidebar.vue'
-import RefinementWizard from '../components/editor/RefinementWizard.vue'
 import HomeView from '../components/home/HomeView.vue'
 import WelcomeView from '../components/home/WelcomeView.vue'
 import StatusBar from '../components/editor/StatusBar.vue'
@@ -24,8 +22,13 @@ import { useCommandCenterStore } from '../stores/commandCenter'
 import { useEditorUiStore } from '../stores/editorUi'
 import { useHistoryStore } from '../stores/history'
 import { useSettingsStore } from '../stores/settings'
+import { useSidebarViewStore } from '../stores/sidebarView'
 
-const workspaceRef = ref<InstanceType<typeof EditorWorkspace> | null>(null)
+const EditorWorkspace = defineAsyncComponent(() => import('../components/editor/EditorWorkspace.vue'))
+const WorkspaceLayout = defineAsyncComponent(() => import('../components/workspace/WorkspaceLayout.vue'))
+const RefinementWizard = defineAsyncComponent(() => import('../components/editor/RefinementWizard.vue'))
+
+const workspaceRef = ref<InstanceType<typeof EditorWorkspaceType> | null>(null)
 const files = useFileActions()
 const doc = useDocumentStore()
 const workspace = useWorkspaceStore()
@@ -35,6 +38,7 @@ const commandCenter = useCommandCenterStore()
 const editorUi = useEditorUiStore()
 const history = useHistoryStore()
 const settings = useSettingsStore()
+const sidebar = useSidebarViewStore()
 const refineOpen = ref(false)
 
 async function onUndoRedo(cmd: 'undo' | 'redo'): Promise<boolean> {
@@ -106,7 +110,12 @@ useKeyboardShortcuts(
     closeCommandCenter: () => commandCenter.close()
   },
   () => editorUi.toggleProjectSidebar(),
-  () => settings.show()
+  () => settings.show(),
+  (mode) => {
+    workspace.setInformalCollapsed(false)
+    if (mode === 'explorer') sidebar.showExplorer()
+    else void sidebar.openFindInFiles(mode === 'replace')
+  }
 )
 
 let unsubClose: (() => void) | undefined
@@ -146,7 +155,7 @@ onUnmounted(() => {
     </main>
     <StatusBar />
     <NewProjectTemplateDialog />
-    <RefinementWizard :open="refineOpen" @close="refineOpen = false" />
+    <RefinementWizard v-if="refineOpen" :open="refineOpen" @close="refineOpen = false" />
     <Modal
       v-if="modalStore.request"
       :open="!!modalStore.request"

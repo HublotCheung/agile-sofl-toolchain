@@ -14,6 +14,7 @@ import {
   type LlmTestRequest
 } from './profiles'
 import { runAgentTurn, resumeWithToolResult, type AgentTurnContext } from './agentLoop'
+import type { AgentSession } from './agentTypes'
 import {
   createSession,
   deleteSession,
@@ -23,6 +24,7 @@ import {
   loadSession,
   renameSession,
   rewindSession,
+  sessionForRenderer,
   setSessionFlag
 } from './sessionStore'
 import { AGENT_SKILLS } from './skills'
@@ -31,8 +33,25 @@ function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T
 }
 
+function publish(session: AgentSession | null): AgentSession | null {
+  return session ? sessionForRenderer(session) : null
+}
+
 function emitDelta(event: IpcMainInvokeEvent, payload: unknown): void {
-  event.sender.send('studio:agent-delta', clone(payload))
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    (payload as { kind?: string }).kind === 'session' &&
+    (payload as { session?: AgentSession }).session
+  ) {
+    const sessionPayload = payload as { session: AgentSession }
+    event.sender.send('studio:agent-delta', {
+      ...sessionPayload,
+      session: sessionForRenderer(sessionPayload.session)
+    })
+    return
+  }
+  event.sender.send('studio:agent-delta', payload)
 }
 
 const agentTurns = new Map<string, AbortController>()
@@ -82,9 +101,7 @@ export function registerAgentHandlers(): void {
     AGENT_SKILLS.map((s) => ({ id: s.id, name: s.name }))
   )
 
-  ipcMain.handle('studio:agent-list-sessions', (_e, projectRoot: string) =>
-    clone(listSessions(projectRoot))
-  )
+  ipcMain.handle('studio:agent-list-sessions', (_e, projectRoot: string) => listSessions(projectRoot))
 
   ipcMain.handle(
     'studio:agent-create-session',
@@ -96,7 +113,7 @@ export function registerAgentHandlers(): void {
       permissions?: AgentTurnContext['permissions']
       promptExtras?: string
     }) =>
-      clone(
+      publish(
         createSession(payload.projectRoot, payload.moduleId || 'project', payload.title, {
           skillId: payload.skillId,
           permissions: payload.permissions,
@@ -108,13 +125,13 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     'studio:agent-rename-session',
     (_e, payload: { projectRoot: string; id: string; title: string }) =>
-      clone(renameSession(payload.projectRoot, payload.id, payload.title))
+      publish(renameSession(payload.projectRoot, payload.id, payload.title))
   )
 
   ipcMain.handle(
     'studio:agent-duplicate-session',
     (_e, payload: { projectRoot: string; id: string }) =>
-      clone(duplicateSession(payload.projectRoot, payload.id))
+      publish(duplicateSession(payload.projectRoot, payload.id))
   )
 
   ipcMain.handle(
@@ -129,7 +146,7 @@ export function registerAgentHandlers(): void {
         title?: string
       }
     ) =>
-      clone(
+      publish(
         forkSession(payload.projectRoot, payload.id, payload.throughMessageId, {
           mode: payload.mode,
           title: payload.title
@@ -149,7 +166,7 @@ export function registerAgentHandlers(): void {
         exclusive?: boolean
       }
     ) =>
-      clone(
+      publish(
         rewindSession(payload.projectRoot, payload.id, payload.throughMessageId, {
           mode: payload.mode,
           exclusive: payload.exclusive
@@ -160,7 +177,7 @@ export function registerAgentHandlers(): void {
   ipcMain.handle(
     'studio:agent-flag-session',
     (_e, payload: { projectRoot: string; id: string; flag: 'pinned' | 'archived'; value: boolean }) =>
-      clone(setSessionFlag(payload.projectRoot, payload.id, payload.flag, payload.value))
+      publish(setSessionFlag(payload.projectRoot, payload.id, payload.flag, payload.value))
   )
 
   ipcMain.handle(
@@ -170,7 +187,8 @@ export function registerAgentHandlers(): void {
 
   ipcMain.handle(
     'studio:agent-load-session',
-    (_e, payload: { projectRoot: string; id: string }) => clone(loadSession(payload.projectRoot, payload.id))
+    (_e, payload: { projectRoot: string; id: string }) =>
+      publish(loadSession(payload.projectRoot, payload.id))
   )
 
   ipcMain.handle(
@@ -198,7 +216,7 @@ export function registerAgentHandlers(): void {
           },
           signal
         )
-        return clone(next)
+        return publish(next)
       } finally {
         finishAgentTurn(session.id, signal)
       }
@@ -232,7 +250,7 @@ export function registerAgentHandlers(): void {
           payload.continueTurn !== false,
           signal
         )
-        return clone(next)
+        return publish(next)
       } finally {
         finishAgentTurn(session.id, signal)
       }

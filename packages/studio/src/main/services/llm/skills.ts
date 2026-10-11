@@ -60,7 +60,7 @@ Pipeline — keep going after each applied patch until every enabled stage is do
 4. Per module: add process signatures from Functions (kind=process).
 5. Per process: replace-process-body or add scenarios. Write the FSF (FSF : T1 && D1 || T2 && D2 || … || others && Dn); Ti/Di may be structured natural language at this stage. Enumerations use {<Tag>}.
 6. Add invariants (kind=inv) from Constraints. Do NOT dump GUI widgets into Hybrid CRUD.
-7. For UI, call read_gui_specification then propose_gui_changes. Each screen is its own HTML page (data-screen) with data-nav to sibling screens so the prototype can click-switch. Build a high-fidelity HTML prototype (shell, sidebar, hero, cards, forms, lists, empty states) — not a page of three buttons. Use whitelist tags plus any as-* class. Bind with data-process / data-bind / data-nav. Prefer replace-screen-html with the full inner layout of that one screen. Hybrid gui blocks stay as slim screen→process traces.
+7. For UI, call read_gui_specification then propose_gui_changes. Each screen is its own HTML page (data-screen) with data-nav to sibling screens so the prototype can click-switch. ONE screen per call — a multi-screen payload is truncated and rejected. Build a high-fidelity HTML prototype (shell, sidebar, hero, cards, forms, lists, empty states) — not a page of three buttons. Use whitelist tags plus any as-* class. Bind with data-process / data-bind / data-nav. Prefer replace-screen-html with the full inner layout of that one screen. Inline <script type="text/as-logic"> may compute or animate inside that screen (price ticks, counters); it cannot reload the host app. Hybrid gui blocks stay as slim screen→process traces.
 After every applied write, call read_hybrid_specification / read_gui_specification and fix gaps until inventories are correct.
 8. Three-line refinement is a later stage, not automatic. After enabled Hybrid/GUI stages finish, call read_refinement_state. If unambiguous=false, ask_clarification with 2–4 next slices (empty module, stub process, FormalizePredicate, data retrieve, operational grain). Do not refine the entire tree in one go. Do not claim the specification has no ambiguity while empty modules, stubs, processAmbiguity, dataAmbiguity, or grainAmbiguity remain. Grain questions may only use variations already listed in the digest.
 Last message = summary of completed generation stages plus remaining refinement gaps.
@@ -134,7 +134,7 @@ export const AGENT_TOOLS = [
                 target: {
                   type: 'string',
                   description:
-                    'add only: functions | data-resources | constraints, or a parent node id (for nested fields).'
+                    'add only: functions | data-resources | constraints, or a parent node id. Depth is unlimited.'
                 },
                 id: {
                   type: 'string',
@@ -152,7 +152,12 @@ export const AGENT_TOOLS = [
                       enum: ['function', 'data-resource', 'data-field', 'constraint', 'text']
                     },
                     title: { type: 'string' },
-                    description: { type: 'string' }
+                    description: { type: 'string' },
+                    children: {
+                      type: 'array',
+                      description: 'Optional nested nodes. Each item repeats type, title, description, and children.',
+                      items: { type: 'object' }
+                    }
                   }
                 }
               },
@@ -334,7 +339,7 @@ export const AGENT_TOOLS = [
     function: {
       name: 'propose_gui_changes',
       description:
-        'Propose a structured GUI HTML patch. Prefer replace-screen-html with a complete inner layout (navbar/sidebar/hero/cards/forms/tables), not a single button. Ops: add-screen (optional html), remove-screen, add-widget, replace-html, replace-screen-html, insert-html, patch-node, remove-node. Whitelist HTML5 tags; any as-* class is allowed. Bind with data-process / data-bind / data-nav. Never emit <script>, style=, href, or src.',
+        'Propose a structured GUI HTML patch. ONE screen per call (replace-screen-html or add-screen) with a complete inner layout (navbar/sidebar/hero/cards/forms/tables), not a single button and not every screen at once. Ops: add-screen (optional html), remove-screen, add-widget, replace-html, replace-screen-html, insert-html, patch-node, remove-node. Whitelist HTML5 tags; any as-* class is allowed. Bind with data-process / data-bind / data-nav. Inline <script type="text/as-logic"> is allowed for calculations and animations and runs in a sandbox. Also allowed: onclick, oninput, onchange. Never emit <script src>, style=, href, or src.',
       parameters: {
         type: 'object',
         properties: {
@@ -426,13 +431,13 @@ export const AGENT_TOOLS = [
     function: {
       name: 'propose_source_edit',
       description:
-        'Last-resort source-level edit of Informal markdown or Hybrid .asfl. Prefer propose_changes / propose_hybrid_changes. Use this only when CRUD failed, leftover unparsed text remains, inventory is empty/out of sync, or you must fix text the structured tools cannot express. Read view=source first. Ops: replace (unique oldText → newText; all:true to replace every match), append, replace-document.',
+        'Last-resort source-level edit of Informal markdown, Hybrid .asfl, or GUI html. Prefer propose_changes / propose_hybrid_changes / propose_gui_changes. Use this only when CRUD failed, leftover unparsed text remains, inventory is empty/out of sync, or you must fix text the structured tools cannot express. Read view=source first. Pass target "gui" for the GUI file and edit one screen, not the whole document. Ops: replace (unique oldText → newText; all:true to replace every match), append, replace-document.',
       parameters: {
         type: 'object',
         properties: {
           target: {
             type: 'string',
-            enum: ['informal', 'hybrid'],
+            enum: ['informal', 'hybrid', 'gui'],
             description: 'Which open specification file to edit'
           },
           explanation: { type: 'string' },

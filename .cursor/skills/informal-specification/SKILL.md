@@ -18,7 +18,7 @@ API: `parseInformalSpec` / `serializeInformalSpec` / `applyInformalPatch`.
 
 - Mutate the model (or patches), then serialize.
 - Keep round-trip: `parse(serialize(model)) ≈ model`.
-- Use Document View for prose, Graphical View for structure: three columns (Functions / Data Sources / Constraints), in-column drag, context menu, body inspector.
+- Use Document View for prose, Graphical View for structure: three columns (Functions / Data Sources / Constraints). Each column is an arbitrary-depth tree, expanded by default and collapsible. In-column drag, context menu, and the body inspector apply at every level.
 
 ## Don't
 

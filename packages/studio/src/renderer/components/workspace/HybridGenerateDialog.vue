@@ -10,6 +10,7 @@ import SegmentedChoice from '../ui/SegmentedChoice.vue'
 import Checkbox from '../ui/Checkbox.vue'
 import type { HybridGenerateParamsPayload } from '../../../preload/index'
 import { buildClientHybridAgentBootstrap } from '../../lib/hybridAgentBootstrap'
+import { localeForZhEnApi, type Locale } from '../../i18n'
 
 type ChangeItem = { id: string; kind: string; name: string; summary: string; selected?: boolean }
 type GeneratorInfo = { id: string; name: string; runtime?: 'batch' | 'agent' }
@@ -117,7 +118,7 @@ function buildParams(): HybridGenerateParamsPayload {
     strategy: strategy.value,
     inferUnstatedDesign: inferUnstated.value,
     moduleSplit: moduleSplit.value,
-    locale: locale.value === 'en' ? 'en' : 'zh-CN'
+    locale: localeForZhEnApi(locale.value as Locale)
   }
 }
 

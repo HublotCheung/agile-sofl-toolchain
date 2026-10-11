@@ -21,6 +21,8 @@
 # Constraints
 ```
 
+- 节内从 `##` 起，每深一层多一个 `#`。Function、Data Resource、Constraint 都可以任意嵌套；Data Resource 的下级是 field，field 还可以继续嵌套。超过六个 `#` 仍然是本格式的标题。
+
 - 节点 ID 由标题派生，**不**写进用户 Markdown。旧文件里的 `<!-- @id:... -->` 仍可解析，打开时会从编辑器中去掉。
 - 规格元信息（`id` / `moduleId` / `title` / `hybridTarget` / `guiTarget`）放在项目内部文件 `.agile-sofl/informal-meta.json`，**不要**写进用户编辑的 `.aspec`。
 - 旧 YAML `.aspec` 仍可解析（兼容）。旧 Markdown 若带 YAML frontmatter，打开时会迁到 sidecar 并从编辑器中去掉。

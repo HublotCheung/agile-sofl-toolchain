@@ -108,6 +108,23 @@ function nestedOf(node: InformalNode): InformalNode[] {
   return node.metadata.nested as InformalNode[]
 }
 
+function readNested(node: { metadata?: Record<string, unknown>; children?: unknown }): InformalNode[] {
+  const meta = node.metadata?.nested
+  if (Array.isArray(meta) && meta.some(isNodeLike)) return meta.filter(isNodeLike)
+  const raw = node.children
+  if (Array.isArray(raw) && raw.some(isNodeLike)) return raw.filter(isNodeLike)
+  return []
+}
+
+function isNodeLike(value: unknown): value is InformalNode {
+  return Boolean(value) && typeof value === 'object' && typeof (value as InformalNode).title === 'string'
+}
+
+function containsNode(node: InformalNode, id: string): boolean {
+  if (node.id === id) return true
+  return readNested(node).some((child) => containsNode(child, id))
+}
+
 function sectionOf(spec: InformalSpecification, target: InformalSectionType | string): InformalSection | undefined {
   return (
     spec.sections.find((s) => s.type === target) ??
@@ -141,26 +158,34 @@ function insertNode(
   spec: InformalSpecification,
   parentId: string | InformalSectionType,
   node: InformalNode,
-  afterId?: string
+  afterId?: string,
+  beforeId?: string
 ): boolean {
   const resolvedParent = resolveSectionRef(String(parentId)) ?? parentId
   const section = sectionOf(spec, resolvedParent)
   if (section && (resolvedParent === section.type || resolvedParent === section.id)) {
-    insertInto(section.children, node, afterId)
+    insertInto(section.children, node, afterId, beforeId)
     node.parentId = undefined
     return true
   }
   const parent = resolveNodeRef(spec, String(resolvedParent))
   if (!parent) return false
   const nested = nestedOf(parent)
-  insertInto(nested, node, afterId)
+  insertInto(nested, node, afterId, beforeId)
   parent.metadata = { ...parent.metadata, nested }
   parent.children = nested.map((c) => c.id)
   node.parentId = parent.id
   return true
 }
 
-function insertInto(list: InformalNode[], node: InformalNode, afterId?: string): void {
+function insertInto(list: InformalNode[], node: InformalNode, afterId?: string, beforeId?: string): void {
+  if (beforeId) {
+    const beforeIdx = list.findIndex((n) => n.id === beforeId)
+    if (beforeIdx >= 0) {
+      list.splice(beforeIdx, 0, node)
+      return
+    }
+  }
   if (!afterId) {
     list.push(node)
     return
@@ -179,13 +204,13 @@ function hydrateIncoming(
   const title = String(incoming?.title ?? '').trim() || 'Untitled'
   const id = incoming?.id && !used.has(incoming.id) ? incoming.id : createNodeId(type, title, used)
   used.add(id)
-  const children = (incoming?.children ?? []) as InformalNode[]
+  const children = readNested(incoming ?? {})
   const nested = children.map((child) =>
     hydrateIncoming(
       {
         op: 'add',
         target: id,
-        node: { ...child, children: (child.metadata?.nested as InformalNode[] | undefined) ?? [] }
+        node: { ...child, children: readNested(child) }
       },
       used
     )
@@ -248,7 +273,27 @@ export function applyInformalPatch(
       }
     } else if (op.op === 'move') {
       const target = resolveNodeRef(next, op.id)
-      const moved = target ? removeNode(next, target.id) : undefined
+      if (!target) {
+        diagnostics.push({
+          code: 'ASPEC_PATCH_001',
+          message: `Cannot move unknown node "${op.id}".`,
+          severity: 'error',
+          path: op.id
+        })
+        continue
+      }
+      const parentKey = resolveSectionRef(String(op.parentId)) ?? op.parentId
+      const parentNode = resolveNodeRef(next, String(parentKey))
+      if (parentNode && containsNode(target, parentNode.id)) {
+        diagnostics.push({
+          code: 'ASPEC_PATCH_001',
+          message: `Cannot move "${op.id}" under itself.`,
+          severity: 'error',
+          path: op.id
+        })
+        continue
+      }
+      const moved = removeNode(next, target.id)
       if (!moved) {
         diagnostics.push({
           code: 'ASPEC_PATCH_001',
@@ -258,7 +303,7 @@ export function applyInformalPatch(
         })
         continue
       }
-      const ok = insertNode(next, op.parentId, moved, op.afterId)
+      const ok = insertNode(next, op.parentId, moved, op.afterId, op.beforeId)
       if (!ok) {
         diagnostics.push({
           code: 'ASPEC_PATCH_001',

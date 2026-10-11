@@ -4,7 +4,10 @@ import {
   createQueuedMessage,
   enqueueMessage,
   removeQueuedMessage,
+  sessionStillRunning,
   shiftQueuedMessage,
+  shouldAutoFlushQueue,
+  takeQueuedMessage,
   updateQueuedMessage
 } from '../src/renderer/components/workspace/agent/agentQueue'
 
@@ -35,5 +38,24 @@ describe('agent message queue', () => {
       next: { id: 'a', text: 'one*' },
       rest: [{ id: 'b', text: 'two' }]
     })
+    expect(takeQueuedMessage(edited, 'b')).toEqual({
+      item: { id: 'b', text: 'two' },
+      rest: [{ id: 'a', text: 'one*' }]
+    })
+  })
+
+  it('auto-sends only after the agent has fully stopped', () => {
+    expect(shouldAutoFlushQueue({ busy: true, interrupted: false, stillRunning: false })).toBe(false)
+    expect(shouldAutoFlushQueue({ busy: false, interrupted: false, stillRunning: true })).toBe(false)
+    expect(shouldAutoFlushQueue({ busy: false, interrupted: true, stillRunning: false })).toBe(false)
+    expect(shouldAutoFlushQueue({ busy: false, interrupted: false, stillRunning: false })).toBe(true)
+  })
+
+  it('treats a pending tool or live stream as the turn still running', () => {
+    expect(sessionStillRunning({ context: { pendingToolCallId: 'call-1' }, messages: [] })).toBe(true)
+    expect(sessionStillRunning({ context: {}, messages: [{ pending: true }] })).toBe(true)
+    expect(sessionStillRunning({ context: {}, messages: [{ streaming: true }] })).toBe(true)
+    expect(sessionStillRunning({ context: {}, messages: [{ pending: false, streaming: false }] })).toBe(false)
+    expect(sessionStillRunning(null)).toBe(false)
   })
 })

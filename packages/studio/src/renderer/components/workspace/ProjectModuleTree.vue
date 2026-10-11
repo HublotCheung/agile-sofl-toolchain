@@ -11,13 +11,16 @@ import { executeWorkspaceTreeAction, promptNewProject } from '../../workspaceTre
 import type { WorkspaceTreeContext } from '../../workspaceTree/types'
 import WorkspaceTreeContextMenu from './WorkspaceTreeContextMenu.vue'
 import WorkspacePanel from './WorkspacePanel.vue'
+import SearchView from './SearchView.vue'
 import StudioIcon from '../ui/StudioIcon.vue'
+import { useSidebarViewStore } from '../../stores/sidebarView'
 import { contextMenuPoint } from '../../lib/contextMenuPoint'
 
 initWorkspaceTreeMenuProviders()
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const sidebar = useSidebarViewStore()
 const visual = inject(VISUAL_MODEL_KEY, null)
 const git = useGitStatus()
 
@@ -161,12 +164,46 @@ watch(
 
 <template>
   <WorkspacePanel panel="tree" class="flex flex-col overflow-hidden bg-surface-raised">
+    <div class="flex h-8 shrink-0 items-end border-b border-border-subtle px-1">
+      <button
+        type="button"
+        class="flex h-8 w-8 items-center justify-center border-b-2"
+        :class="
+          sidebar.view === 'explorer'
+            ? 'border-accent text-content-primary'
+            : 'border-transparent text-content-muted hover:text-content-primary'
+        "
+        :title="`${t('workspace.view.explorer')} (Ctrl+Shift+E)`"
+        :aria-label="t('workspace.view.explorer')"
+        :aria-pressed="sidebar.view === 'explorer'"
+        @click="sidebar.showExplorer()"
+      >
+        <StudioIcon icon="hugeicons:hierarchy-square-01" :size="16" />
+      </button>
+      <button
+        type="button"
+        class="flex h-8 w-8 items-center justify-center border-b-2"
+        :class="
+          sidebar.view === 'search'
+            ? 'border-accent text-content-primary'
+            : 'border-transparent text-content-muted hover:text-content-primary'
+        "
+        :title="`${t('workspace.view.search')} (Ctrl+Shift+F)`"
+        :aria-label="t('workspace.view.search')"
+        :aria-pressed="sidebar.view === 'search'"
+        @click="sidebar.showSearch()"
+      >
+        <StudioIcon icon="lucide:search" :size="16" />
+      </button>
+    </div>
+    <SearchView v-if="sidebar.view === 'search'" />
+    <template v-else>
     <div class="flex h-7 shrink-0 items-center gap-0.5 border-b border-border-subtle px-1.5">
       <div
-        class="flex min-w-0 flex-1 items-center px-1 text-content-primary"
+        class="flex min-w-0 flex-1 items-center truncate px-1 text-[11px] font-semibold uppercase tracking-wide text-content-primary"
         :title="t('workspace.fileHierarchy')"
       >
-        <StudioIcon icon="hugeicons:hierarchy-square-01" :size="15" />
+        {{ t('workspace.view.explorer') }}
       </div>
       <button
         type="button"
@@ -317,6 +354,7 @@ watch(
         </div>
       </div>
     </div>
+    </template>
     <WorkspaceTreeContextMenu
       :open="menuOpen"
       :x="menuX"

@@ -5,6 +5,7 @@ import type { InformalNodePayload, InformalSpecPayload } from '../../../preload/
 import { nestedNodes } from '../../../composables/useInformalSpec'
 import { useWorkspaceStore } from '../../../stores/workspace'
 import IconActionButton from '../../ui/IconActionButton.vue'
+import InformalTreeNode, { type InformalDropHint } from './InformalTreeNode.vue'
 
 type SectionType = 'functions' | 'data-resources' | 'constraints'
 type MenuAction = 'rename' | 'duplicate' | 'delete' | 'copy'
@@ -12,8 +13,9 @@ type MenuAction = 'rename' | 'duplicate' | 'delete' | 'copy'
 const props = defineProps<{ spec: InformalSpecPayload | null }>()
 const emit = defineEmits<{
   select: [id: string]
-  move: [id: string, parentId: string, afterId?: string]
+  move: [id: string, parentId: string, afterId?: string, beforeId?: string]
   add: [section: SectionType]
+  addChild: [parentId: string]
   rename: [id: string, title: string]
   remove: [id: string]
   duplicate: [id: string]
@@ -28,12 +30,13 @@ const collapsed = ref<Record<SectionType, boolean>>({
   'data-resources': false,
   constraints: false
 })
+const collapsedNodes = ref<Record<string, boolean>>({})
 const renamingId = ref<string | null>(null)
 const renameDraft = ref('')
 const menu = ref<{ x: number; y: number; id: string } | null>(null)
 const bodyDraft = ref('')
 const draggingId = ref<string | null>(null)
-const dropHint = ref<{ section: SectionType; afterId?: string } | null>(null)
+const dropHint = ref<(InformalDropHint & { section: SectionType }) | null>(null)
 
 const columns: Array<{ type: SectionType; tone: string; bar: string }> = [
   { type: 'functions', tone: 'text-section-functions', bar: 'bg-section-functions' },
@@ -47,6 +50,30 @@ watch(
   () => selected.value,
   (id) => {
     bodyDraft.value = id ? findNode(id)?.description ?? '' : ''
+    if (!id || !props.spec) return
+    const next = { ...collapsedNodes.value }
+    let changed = false
+    const walk = (nodes: InformalNodePayload[], stack: string[]): boolean => {
+      for (const node of nodes) {
+        if (node.id === id) {
+          for (const ancestor of stack) {
+            if (next[ancestor]) {
+              next[ancestor] = false
+              changed = true
+            }
+          }
+          return true
+        }
+        if (walk(nestedNodes(node), [...stack, node.id])) return true
+      }
+      return false
+    }
+    for (const section of props.spec.sections) {
+      if (!walk(section.children, [])) continue
+      collapsed.value[section.type] = false
+      break
+    }
+    if (changed) collapsedNodes.value = next
   }
 )
 
@@ -177,7 +204,32 @@ function onDragEnd(): void {
   dropHint.value = null
 }
 
-function onDragOver(e: DragEvent, section: SectionType, afterId?: string): void {
+function containsNode(rootId: string, targetId: string): boolean {
+  if (rootId === targetId) return true
+  const root = findNode(rootId)
+  if (!root) return false
+  const walk = (nodes: InformalNodePayload[]): boolean =>
+    nodes.some((node) => node.id === targetId || walk(nestedNodes(node)))
+  return walk(nestedNodes(root))
+}
+
+function countNodes(nodes: InformalNodePayload[]): number {
+  return nodes.reduce((total, node) => total + 1 + countNodes(nestedNodes(node)), 0)
+}
+
+function toggleNode(id: string): void {
+  collapsedNodes.value = { ...collapsedNodes.value, [id]: !collapsedNodes.value[id] }
+}
+
+function onAddChild(id: string): void {
+  menu.value = null
+  const section = sectionTypeOf(id)
+  if (section) collapsed.value[section] = false
+  collapsedNodes.value = { ...collapsedNodes.value, [id]: false }
+  emit('addChild', id)
+}
+
+function onDragOver(e: DragEvent, section: SectionType): void {
   const dragSection = sectionTypeOf(draggingId.value ?? '')
   if (dragSection && dragSection !== section) {
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
@@ -185,18 +237,61 @@ function onDragOver(e: DragEvent, section: SectionType, afterId?: string): void 
   }
   e.preventDefault()
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  dropHint.value = { section, afterId }
+  dropHint.value = { section, parentId: section, into: false }
 }
 
-function onDrop(e: DragEvent, section: SectionType, afterId?: string): void {
+function onNodeDragOver(
+  e: DragEvent,
+  hint: { section: SectionType; parentId: string; targetId: string; placement: 'before' | 'into' | 'after' }
+): void {
+  e.stopPropagation()
+  const dragId = draggingId.value
+  const dragSection = sectionTypeOf(dragId ?? '')
+  if (!dragId || dragSection !== hint.section || containsNode(dragId, hint.targetId)) {
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+    dropHint.value = null
+    return
+  }
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  if (hint.placement === 'into') {
+    dropHint.value = { section: hint.section, parentId: hint.targetId, into: true }
+    return
+  }
+  if (hint.placement === 'before') {
+    dropHint.value = { section: hint.section, parentId: hint.parentId, beforeId: hint.targetId, into: false }
+    return
+  }
+  dropHint.value = { section: hint.section, parentId: hint.parentId, afterId: hint.targetId, into: false }
+}
+
+function onDrop(e: DragEvent, section: SectionType): void {
   e.preventDefault()
   const id = e.dataTransfer?.getData('text/informal-id') || draggingId.value
   const fromSection = sectionTypeOf(id ?? '')
+  const hint = dropHint.value
   draggingId.value = null
   dropHint.value = null
   if (!id || fromSection !== section) return
-  if (id === afterId) return
-  emit('move', id, section, afterId)
+  if (hint && hint.section === section) {
+    if (id === hint.afterId || id === hint.beforeId || id === hint.parentId) return
+    if (hint.into) collapsedNodes.value = { ...collapsedNodes.value, [hint.parentId]: false }
+    emit('move', id, hint.parentId, hint.afterId, hint.beforeId)
+    return
+  }
+  emit('move', id, section)
+}
+
+function onNodeDrop(e: DragEvent): void {
+  e.preventDefault()
+  e.stopPropagation()
+  const section = dropHint.value?.section
+  if (!section) {
+    draggingId.value = null
+    dropHint.value = null
+    return
+  }
+  onDrop(e, section)
 }
 
 function commitBody(): void {
@@ -214,7 +309,7 @@ function onAdd(type: SectionType): void {
 }
 
 function placeholderCount(type: SectionType): string {
-  return String(nodesOf(type).length)
+  return String(countNodes(nodesOf(type)))
 }
 </script>
 
@@ -256,56 +351,31 @@ function placeholderCount(type: SectionType): string {
             {{ t('informal.emptySection') }}
           </p>
           <ul v-else class="space-y-1">
-            <li
+            <InformalTreeNode
               v-for="node in nodesOf(col.type)"
               :key="node.id"
-              :draggable="renamingId !== node.id"
-              class="group cursor-grab rounded-lg border px-2 py-1.5 text-[12px] transition-all duration-150 active:cursor-grabbing"
-              :class="
-                selected === node.id
-                  ? 'border-accent/40 bg-accent/10 text-content-primary shadow-sm'
-                  : 'border-transparent bg-surface-overlay/80 text-content-primary hover:border-border-subtle hover:bg-surface-overlay'
-              "
-              @click="onSelect(node.id)"
-              @contextmenu="openMenu($event, node.id)"
-              @dblclick.stop="startRename(node.id, node.title)"
-              @dragstart="onDragStart($event, node.id, col.type)"
-              @dragend="onDragEnd"
-              @dragover="onDragOver($event, col.type, node.id)"
-              @drop="onDrop($event, col.type, node.id)"
-            >
-              <input
-                v-if="renamingId === node.id"
-                v-model="renameDraft"
-                class="w-full rounded border border-field-border bg-field-bg px-1 py-0.5 text-[12px]"
-                :data-rename="node.id"
-                @click.stop
-                @keydown.enter.prevent="commitRename"
-                @keydown.esc="renamingId = null"
-                @blur="commitRename"
-              />
-              <div v-else class="flex items-start gap-1.5">
-                <span class="mt-0.5 font-mono text-[10px] uppercase tracking-wide text-content-muted">▸</span>
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate font-medium">{{ node.title }}</span>
-                  <span v-if="node.description" class="mt-0.5 line-clamp-2 text-[11px] text-content-muted">{{
-                    node.description
-                  }}</span>
-                </span>
-              </div>
-              <ul v-if="nestedNodes(node).length" class="mt-1 space-y-0.5 pl-4">
-                <li
-                  v-for="child in nestedNodes(node)"
-                  :key="child.id"
-                  class="rounded-md px-1.5 py-1 text-[11px]"
-                  :class="selected === child.id ? 'bg-accent/15 text-accent' : 'text-content-secondary hover:bg-surface-base'"
-                  @click.stop="onSelect(child.id)"
-                  @contextmenu.stop="openMenu($event, child.id)"
-                >
-                  {{ child.title }}
-                </li>
-              </ul>
-            </li>
+              :node="node"
+              :section="col.type"
+              :parent-id="col.type"
+              :depth="0"
+              :selected-id="selected"
+              :renaming-id="renamingId"
+              :rename-draft="renameDraft"
+              :collapsed="collapsedNodes"
+              :drop-hint="dropHint"
+              @select="onSelect"
+              @toggle="toggleNode"
+              @menu="openMenu"
+              @start-rename="startRename"
+              @commit-rename="commitRename"
+              @cancel-rename="renamingId = null"
+              @update:rename-draft="renameDraft = $event"
+              @add-child="onAddChild"
+              @drag-start="onDragStart"
+              @drag-end="onDragEnd"
+              @node-dragover="onNodeDragOver"
+              @node-drop="onNodeDrop"
+            />
           </ul>
         </div>
       </section>
@@ -354,6 +424,9 @@ function placeholderCount(type: SectionType): string {
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
       @mousedown.stop
     >
+      <button type="button" class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-overlay" @click="onAddChild(menu.id)">
+        {{ t('informal.addChild') }}
+      </button>
       <button type="button" class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-surface-overlay" @click="onMenu('rename')">
         {{ t('informal.rename') }}
       </button>

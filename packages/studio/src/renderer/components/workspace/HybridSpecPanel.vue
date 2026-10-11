@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MonacoEditor from '../editor/MonacoEditor.vue'
 import VisualEditor from '../editor/visual/VisualEditor.vue'
@@ -18,6 +18,7 @@ import ResizeSplit from '../ui/ResizeSplit.vue'
 import type { SerializableSpan } from '../editor/MonacoEditor.vue'
 import { VISUAL_MODEL_KEY } from '../../composables/visualModelContext'
 import { spanForHybridSelection } from '../../lib/structureNav'
+import { filePathsEqual } from '../../stores/tabUtils'
 
 initSpecAssistProviders()
 
@@ -34,6 +35,32 @@ const visualRef = ref<InstanceType<typeof VisualEditor> | null>(null)
 const guiSplitRatio = ref(0.62)
 
 const hybridTabId = computed(() => workspace.hybridTab?.id)
+const mountCodeEditor = ref(workspace.hybridMode === 'code')
+
+watch(
+  () => workspace.hybridMode,
+  (mode) => {
+    if (mode === 'code') mountCodeEditor.value = true
+  }
+)
+
+onMounted(() => {
+  if (mountCodeEditor.value) return
+  let idleId = 0
+  let timer = 0
+  const mount = () => {
+    mountCodeEditor.value = true
+  }
+  if (typeof window.requestIdleCallback === 'function') {
+    idleId = window.requestIdleCallback(mount, { timeout: 2000 })
+  } else {
+    timer = window.setTimeout(mount, 1200)
+  }
+  onUnmounted(() => {
+    if (idleId) window.cancelIdleCallback(idleId)
+    if (timer) window.clearTimeout(timer)
+  })
+})
 const { state: refinementState } = useRefinementState()
 const hybridViewOptions = computed(() => [
   { id: 'code', label: t('workspace.codeTab') },
@@ -101,6 +128,28 @@ watch(
   }
 )
 
+watch(
+  () => workspace.editorRevealNonce,
+  async () => {
+    const request = workspace.editorReveal
+    if (!request || request.kind !== 'asfl') return
+    const tab = workspace.hybridTab
+    if (tab?.filePath && !filePathsEqual(tab.filePath, request.filePath)) return
+    await nextTick()
+    await nextTick()
+    monacoRef.value?.relayout()
+    monacoRef.value?.revealSpan(
+      {
+        start: request.start,
+        end: request.end,
+        line: request.line,
+        column: request.column
+      },
+      { select: true }
+    )
+  }
+)
+
 function onVisualSelect(sel: TreeSelection): void {
   if (!sel) return
   workspace.selectModule(sel.moduleName, sel)
@@ -142,7 +191,7 @@ function onRevealSpan(span: SerializableSpan): void {
               :class="workspace.hybridMode === 'code' ? 'z-10' : 'invisible pointer-events-none z-0'"
             >
               <MonacoEditor
-                v-if="hybridTabId"
+                v-if="hybridTabId && mountCodeEditor"
                 ref="monacoRef"
                 :tab-id="hybridTabId"
                 :active="workspace.hybridMode === 'code'"
@@ -193,7 +242,7 @@ function onRevealSpan(span: SerializableSpan): void {
           :class="workspace.hybridMode === 'code' ? 'z-10' : 'invisible pointer-events-none z-0'"
         >
           <MonacoEditor
-            v-if="hybridTabId"
+            v-if="hybridTabId && mountCodeEditor"
             ref="monacoRef"
             :tab-id="hybridTabId"
             :active="workspace.hybridMode === 'code'"

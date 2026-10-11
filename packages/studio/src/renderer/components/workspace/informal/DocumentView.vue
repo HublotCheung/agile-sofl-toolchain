@@ -9,6 +9,7 @@ import { HistoryKinds } from '../../../history/kinds'
 import { useAppStore } from '../../../stores/app'
 import { useWorkspaceStore } from '../../../stores/workspace'
 import { findHeadingIndex, selectElementText } from '../../../lib/structureNav'
+import { localeForMilkdown, type Locale } from '../../../i18n'
 
 type InformalSection = 'functions' | 'data-resources' | 'constraints'
 
@@ -26,6 +27,7 @@ let applyingExternal = false
 type RevealRequest = {
   span: { start: number; end: number; line: number; column: number; title?: string }
   title?: string
+  text?: string
   select?: boolean
 }
 let pendingReveal: RevealRequest | null = null
@@ -78,7 +80,7 @@ function mountEditor(): void {
     cdn: vditorCdn(),
     mode: 'wysiwyg',
     height: '100%',
-    lang: locale.value === 'zh-CN' ? 'zh_CN' : 'en_US',
+    lang: localeForMilkdown(locale.value as Locale),
     theme: isDark.value ? 'dark' : 'classic',
     icon: 'material',
     cache: { enable: false },
@@ -117,9 +119,38 @@ function headingElements(): HTMLElement[] {
   ) as HTMLElement[]
 }
 
+function revealTextInWysiwyg(text: string): boolean {
+  const root = host.value?.querySelector('.vditor-wysiwyg, .vditor-reset')
+  if (!root || !text) return false
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node: Node | null
+  while ((node = walker.nextNode())) {
+    const value = node.textContent ?? ''
+    const index = value.indexOf(text)
+    if (index < 0) continue
+    const parent = node.parentElement
+    if (!parent) continue
+    parent.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const range = document.createRange()
+    range.setStart(node, index)
+    range.setEnd(node, Math.min(value.length, index + text.length))
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    parent.classList.add('informal-md-flash')
+    window.setTimeout(() => parent.classList.remove('informal-md-flash'), 1800)
+    return true
+  }
+  return false
+}
+
 function applyPendingReveal(): void {
   const request = pendingReveal
   if (!request || !host.value) return
+  if (request.text && revealTextInWysiwyg(request.text)) {
+    pendingReveal = null
+    return
+  }
   const headings = headingElements()
   const idx = findHeadingIndex(headings, {
     title: request.title ?? request.span.title,
@@ -136,11 +167,12 @@ function applyPendingReveal(): void {
 
 function revealSpan(
   span: { start: number; end: number; line: number; column: number; title?: string },
-  options?: { title?: string; select?: boolean }
+  options?: { title?: string; select?: boolean; text?: string }
 ): void {
   pendingReveal = {
     span,
     title: options?.title ?? span.title,
+    text: options?.text,
     select: options?.select
   }
   applyPendingReveal()
@@ -178,10 +210,19 @@ watch(
 
 onMounted(() => {
   syncTheme()
-  mountEditor()
   const observer = new MutationObserver(syncTheme)
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+  let idleId = 0
+  let timer = 0
+  const start = () => mountEditor()
+  if (typeof window.requestIdleCallback === 'function') {
+    idleId = window.requestIdleCallback(start, { timeout: 500 })
+  } else {
+    timer = window.setTimeout(start, 32)
+  }
   onUnmounted(() => {
+    if (idleId) window.cancelIdleCallback(idleId)
+    if (timer) window.clearTimeout(timer)
     observer.disconnect()
     editor?.destroy()
     editor = null

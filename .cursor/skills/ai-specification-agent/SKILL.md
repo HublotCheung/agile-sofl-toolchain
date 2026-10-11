@@ -34,6 +34,10 @@ Changes: `Patch → Preview → Apply | Reject`. Apply/Reject is only a tool res
 Sessions: `<project>/.agile-sofl/agent/sessions/`.
 Informal document metadata: `<project>/.agile-sofl/informal-meta.json`.
 
+## GUI prototype
+
+The prototype runs in a sandboxed iframe (`allow-scripts` only). Inline `<script type="text/as-logic">` and `onclick` / `oninput` / `onchange` may compute or animate inside that frame. They must not be able to reload or rewrite the Studio window. Keep one `propose_gui_changes` call to a single screen. Truncated or trailing-junk tool JSON is repaired; a parse failure must not become an empty patch that blocks the next different write.
+
 ## Don't
 
 - Stream raw markdown or raw SOFL into the document from chat text (writes must go through tools).

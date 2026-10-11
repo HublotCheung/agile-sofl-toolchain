@@ -232,6 +232,116 @@ title: Library System Informal Spec
     expect(parsed.displaySource).not.toContain('@id:')
   })
 
+  it('round-trips arbitrary nesting for functions, data sources, and constraints', () => {
+    const source = `# Functions
+
+## Level 1
+
+### Level 2
+
+#### Level 3
+
+##### Level 4
+
+###### Level 5
+
+####### Level 6
+
+######## Level 7
+
+# Data Resources
+
+## Account
+
+### Owner
+
+#### Name
+
+##### Given
+
+# Constraints
+
+## Limit
+
+### Daily
+
+#### Per card
+`
+    const { specification, diagnostics } = parseInformalSpec(source)
+    expect(diagnostics.filter((d) => d.severity === 'error')).toHaveLength(0)
+    const titles: string[] = []
+    const walk = (node: { title: string; type: string; metadata?: Record<string, unknown> }, expected: string) => {
+      expect(node.type).toBe(expected)
+      titles.push(node.title)
+      const nested = (node.metadata?.nested as Array<{ title: string; type: string; metadata?: Record<string, unknown> }>) ?? []
+      for (const child of nested) walk(child, expected === 'data-resource' ? 'data-field' : expected)
+    }
+    walk(specification!.sections[0]!.children[0]!, 'function')
+    const functionTitles = [...titles]
+    expect(functionTitles).toEqual(['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Level 6', 'Level 7'])
+    walk(specification!.sections[1]!.children[0]!, 'data-resource')
+    walk(specification!.sections[2]!.children[0]!, 'constraint')
+    expect(titles).toContain('Given')
+    expect(titles).toContain('Per card')
+
+    const text = serializeInformalSpec(specification!)
+    expect(text).toContain('######## Level 7')
+    expect(text).toContain('#### Name')
+    expect(text).toContain('### Daily')
+    const again = parseInformalSpec(text)
+    const againTitles: string[] = []
+    const collect = (node: { title: string; metadata?: Record<string, unknown> }) => {
+      againTitles.push(node.title)
+      const nested = (node.metadata?.nested as Array<{ title: string; metadata?: Record<string, unknown> }>) ?? []
+      for (const child of nested) collect(child)
+    }
+    collect(again.specification!.sections[0]!.children[0]!)
+    expect(againTitles).toEqual(functionTitles)
+  })
+
+  it('duplicates a subtree and can insert before a sibling', () => {
+    const { specification } = parseInformalSpec(`# Functions
+
+## Login
+
+### Check PIN
+
+#### Format
+`)
+    const login = specification!.sections[0]!.children[0]!
+    const duplicated = applyInformalPatch(specification!, {
+      operations: [
+        {
+          op: 'add',
+          target: 'functions',
+          afterId: login.id,
+          node: {
+            type: 'function',
+            title: 'Login copy',
+            description: login.description,
+            children: (login.metadata?.nested as Array<{ type: string; title: string; description?: string; metadata?: { nested?: unknown[] } }>) ?? []
+          }
+        }
+      ]
+    })
+    const roots = duplicated.spec.sections[0]!.children
+    expect(roots.map((node) => node.title)).toEqual(['Login', 'Login copy'])
+    const copyNested = roots[1]!.metadata?.nested as Array<{ title: string; metadata?: { nested?: Array<{ title: string }> } }>
+    expect(copyNested[0]?.title).toBe('Check PIN')
+    expect(copyNested[0]?.metadata?.nested?.[0]?.title).toBe('Format')
+
+    const moved = applyInformalPatch(duplicated.spec, {
+      operations: [{ op: 'move', id: roots[1]!.id, parentId: 'functions', beforeId: login.id }]
+    })
+    expect(moved.spec.sections[0]!.children.map((node) => node.title)).toEqual(['Login copy', 'Login'])
+
+    const cycle = applyInformalPatch(specification!, {
+      operations: [{ op: 'move', id: login.id, parentId: ((login.metadata?.nested as Array<{ id: string }>) ?? [])[0]!.id }]
+    })
+    expect(cycle.diagnostics.some((d) => d.code === 'ASPEC_PATCH_001')).toBe(true)
+    expect(cycle.spec.sections[0]!.children[0]?.title).toBe('Login')
+  })
+
   it('parseAspec synthesizes a hybrid-ready document from markdown', () => {
     const { document, format } = parseAspec(SAMPLE_MD)
     expect(format).toBe('markdown')

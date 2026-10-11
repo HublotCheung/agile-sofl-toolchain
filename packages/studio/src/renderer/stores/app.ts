@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { setLocale, type Locale } from '../i18n'
-import { applyMonacoTheme } from '../monaco/setup'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
@@ -11,9 +10,16 @@ function resolveDark(mode: ThemeMode): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
+let themeClassReady = false
+
 function applyThemeClass(dark: boolean): void {
   document.documentElement.classList.toggle('dark', dark)
-  applyMonacoTheme(dark ? 'agile-sofl-dark' : 'agile-sofl-light')
+  if (!themeClassReady) {
+    themeClassReady = true
+    return
+  }
+  const theme = dark ? 'agile-sofl-dark' : 'agile-sofl-light'
+  void import('../monaco/setup').then(({ applyMonacoTheme }) => applyMonacoTheme(theme))
 }
 
 const savedTheme = (localStorage.getItem('studio-theme') as ThemeMode | null) ?? 'system'

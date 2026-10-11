@@ -18,6 +18,7 @@ onMounted(async () => {
   await initLocaleFromSystem()
   await app.init()
   settings.init()
+  await window.studio?.whenBackendReady?.()
   const opened = await workspace.init()
   if (!opened && !doc.restoreFromSession()) {
     doc.initHome()

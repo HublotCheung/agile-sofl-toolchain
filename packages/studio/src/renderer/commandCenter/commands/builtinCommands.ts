@@ -87,6 +87,22 @@ export const builtinCommands: BuiltinCommand[] = [
     }
   },
   {
+    id: 'edit.findInFiles',
+    titleKey: 'commandCenter.cmd.findInFiles',
+    run: async () => {
+      const { useSidebarViewStore } = await import('../../stores/sidebarView')
+      await useSidebarViewStore().openFindInFiles(false)
+    }
+  },
+  {
+    id: 'edit.replaceInFiles',
+    titleKey: 'commandCenter.cmd.replaceInFiles',
+    run: async () => {
+      const { useSidebarViewStore } = await import('../../stores/sidebarView')
+      await useSidebarViewStore().openFindInFiles(true)
+    }
+  },
+  {
     id: 'view.settings',
     titleKey: 'commandCenter.cmd.openSettings',
     run: async () => {

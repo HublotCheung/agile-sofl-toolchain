@@ -1,4 +1,6 @@
 import type { HybridAgentBootstrapPayload } from '../../preload/index'
+import type { Locale } from '../i18n'
+import { useZhAgentCopy } from '../i18n'
 import type { AtomicityRow } from './atomicityTree'
 
 export type RefineAiToolId =
@@ -45,9 +47,9 @@ export function refineToolsForRow(row: AtomicityRow): RefineAiToolId[] {
 export function buildRefineAgentBootstrap(
   tool: RefineAiToolId,
   row: AtomicityRow,
-  locale: 'zh-CN' | 'en'
+  locale: Locale
 ): HybridAgentBootstrapPayload {
-  const zh = locale !== 'en'
+  const zh = useZhAgentCopy(locale)
   const moduleName = row.moduleName ?? ''
   const processName = row.processName ?? ''
   const specs: Record<

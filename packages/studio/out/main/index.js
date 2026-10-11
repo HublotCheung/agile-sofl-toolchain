@@ -1517,26 +1517,112 @@ function forkSessionRecord(session, throughMessageId, options) {
   copy.archived = false;
   return copy;
 }
+const INDEX_NAME = "_index.json";
 function sessionsDir(projectRoot) {
   return node_path.join(projectRoot, ".agile-sofl", "agent", "sessions");
+}
+function indexPath(projectRoot) {
+  return node_path.join(sessionsDir(projectRoot), INDEX_NAME);
 }
 function ensureDir(dir) {
   node_fs.mkdirSync(dir, { recursive: true });
 }
-function listSessions(projectRoot) {
+function yieldTick() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+function sessionFiles(dir) {
+  return node_fs.readdirSync(dir).filter((file) => file.endsWith(".json") && file !== INDEX_NAME);
+}
+function readIndex(projectRoot) {
+  const file = indexPath(projectRoot);
+  if (!node_fs.existsSync(file)) return null;
+  try {
+    const parsed = JSON.parse(node_fs.readFileSync(file, "utf8"));
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((entry) => entry && typeof entry.id === "string");
+  } catch {
+    return null;
+  }
+}
+function writeIndex(projectRoot, entries) {
+  ensureDir(sessionsDir(projectRoot));
+  node_fs.writeFileSync(indexPath(projectRoot), JSON.stringify(entries), "utf8");
+}
+function entryFromSession(session) {
+  return {
+    id: session.id,
+    moduleId: session.moduleId,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    pinned: session.pinned,
+    archived: session.archived,
+    skillId: session.context.skillId,
+    permissions: session.context.permissions
+  };
+}
+function covers(entries, files, extraId) {
+  const ids = new Set(entries.map((entry) => entry.id));
+  if (extraId) ids.add(extraId);
+  if (ids.size !== files.length) return false;
+  return files.every((file) => ids.has(file.slice(0, -5)));
+}
+function compareSessions(a, b) {
+  if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+  if (Boolean(a.archived) !== Boolean(b.archived)) return a.archived ? 1 : -1;
+  return b.updatedAt.localeCompare(a.updatedAt);
+}
+function toListSession(entry) {
+  return {
+    id: entry.id,
+    moduleId: entry.moduleId,
+    title: entry.title,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    pinned: entry.pinned,
+    archived: entry.archived,
+    messages: [],
+    context: {
+      skillId: entry.skillId,
+      permissions: entry.permissions
+    }
+  };
+}
+function upsertIndex(projectRoot, session) {
+  const dir = sessionsDir(projectRoot);
+  if (!node_fs.existsSync(dir)) return;
+  const files = sessionFiles(dir);
+  const current = readIndex(projectRoot);
+  if (!current || !covers(current, files, session.id)) return;
+  writeIndex(projectRoot, [...current.filter((entry) => entry.id !== session.id), entryFromSession(session)]);
+}
+function sessionForRenderer(session) {
+  if (!session.messages.some((message) => message.role === "tool" && message.content)) return session;
+  return {
+    ...session,
+    messages: session.messages.map(
+      (message) => message.role === "tool" ? { id: message.id, role: "tool", content: "", timestamp: message.timestamp } : message
+    )
+  };
+}
+async function listSessions(projectRoot) {
   const dir = sessionsDir(projectRoot);
   if (!node_fs.existsSync(dir)) return [];
-  return node_fs.readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => {
+  const files = sessionFiles(dir);
+  const indexed = readIndex(projectRoot);
+  if (indexed && covers(indexed, files)) {
+    return indexed.map(toListSession).sort(compareSessions);
+  }
+  const loaded2 = [];
+  for (const file of files) {
     try {
-      return JSON.parse(node_fs.readFileSync(node_path.join(dir, f), "utf8"));
+      loaded2.push(JSON.parse(node_fs.readFileSync(node_path.join(dir, file), "utf8")));
     } catch {
-      return null;
     }
-  }).filter((s) => Boolean(s)).sort((a, b) => {
-    if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
-    if (Boolean(a.archived) !== Boolean(b.archived)) return a.archived ? 1 : -1;
-    return b.updatedAt.localeCompare(a.updatedAt);
-  });
+    await yieldTick();
+  }
+  writeIndex(projectRoot, loaded2.map(entryFromSession));
+  return loaded2.map((session) => toListSession(entryFromSession(session))).sort(compareSessions);
 }
 function loadSession(projectRoot, id) {
   const file = node_path.join(sessionsDir(projectRoot), `${id}.json`);
@@ -1551,12 +1637,15 @@ function saveSession$1(projectRoot, session) {
   const dir = sessionsDir(projectRoot);
   ensureDir(dir);
   session.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-  node_fs.writeFileSync(node_path.join(dir, `${session.id}.json`), JSON.stringify(session, null, 2), "utf8");
+  node_fs.writeFileSync(node_path.join(dir, `${session.id}.json`), JSON.stringify(session), "utf8");
+  upsertIndex(projectRoot, session);
 }
 function deleteSession(projectRoot, id) {
   const file = node_path.join(sessionsDir(projectRoot), `${id}.json`);
   if (!node_fs.existsSync(file)) return false;
   node_fs.unlinkSync(file);
+  const entries = readIndex(projectRoot);
+  if (entries) writeIndex(projectRoot, entries.filter((entry) => entry.id !== id));
   return true;
 }
 function createSession(projectRoot, moduleId, title, options) {
@@ -2619,16 +2708,21 @@ function emit(sink, event) {
   sink?.(event);
 }
 const TOOL_DELTA_THROTTLE_MS = 50;
+const TEXT_DELTA_THROTTLE_MS = 80;
+function yieldToUi() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 function emitToolCall(sink, live, index, status) {
   const call = live.toolCalls?.[index];
   if (!call) return;
+  const args = status === "streaming" && call.arguments.length > 12e3 ? call.arguments.slice(0, 4e3) : call.arguments;
   emit(sink, {
     kind: "tool_call",
     messageId: live.id,
     index,
     id: call.id,
     name: call.name,
-    arguments: call.arguments,
+    arguments: args,
     status
   });
 }
@@ -2645,25 +2739,54 @@ function markRemainingToolCalls(live, status, sink) {
   }
 }
 function attachStreamDeltas(live, sink) {
-  let lastEmitAt = 0;
-  let pending = false;
+  let lastToolEmitAt = 0;
+  let toolsPending = false;
+  let textTimer = null;
+  let lastTextEmitAt = 0;
+  let lastSentContent = "";
+  let lastSentThinking = "";
   const seenNames = /* @__PURE__ */ new Set();
   const emitSnapshot = () => {
-    pending = false;
-    lastEmitAt = Date.now();
+    toolsPending = false;
+    lastToolEmitAt = Date.now();
     for (let i = 0; i < (live.toolCalls?.length ?? 0); i++) {
       emitToolCall(sink, live, i, live.toolCalls[i].status ?? "streaming");
     }
   };
+  const flushText = () => {
+    if (textTimer) {
+      clearTimeout(textTimer);
+      textTimer = null;
+    }
+    lastTextEmitAt = Date.now();
+    const thinking = live.thinking ?? "";
+    if (thinking !== lastSentThinking) {
+      lastSentThinking = thinking;
+      if (thinking) emit(sink, { kind: "reasoning", messageId: live.id, text: thinking });
+    }
+    if (live.content !== lastSentContent) {
+      lastSentContent = live.content;
+      if (live.content) emit(sink, { kind: "content", messageId: live.id, text: live.content });
+    }
+  };
+  const scheduleText = () => {
+    const now = Date.now();
+    if (now - lastTextEmitAt >= TEXT_DELTA_THROTTLE_MS) {
+      flushText();
+      return;
+    }
+    if (textTimer) return;
+    textTimer = setTimeout(() => {
+      textTimer = null;
+      flushText();
+    }, TEXT_DELTA_THROTTLE_MS - (now - lastTextEmitAt));
+  };
   return {
     onDelta(delta) {
-      if (delta.reasoning != null) {
-        live.thinking = delta.reasoning;
-        emit(sink, { kind: "reasoning", messageId: live.id, text: delta.reasoning });
-      }
-      if (delta.content != null) {
-        live.content = delta.content;
-        emit(sink, { kind: "content", messageId: live.id, text: delta.content });
+      if (delta.reasoning != null || delta.content != null) {
+        if (delta.reasoning != null) live.thinking = delta.reasoning;
+        if (delta.content != null) live.content = delta.content;
+        scheduleText();
       }
       if (!delta.toolCalls) return;
       live.toolCalls = delta.toolCalls.map((c, i) => ({
@@ -2679,15 +2802,18 @@ function attachStreamDeltas(live, sink) {
         seenNames.add(key);
         return true;
       });
+      const heavy = (live.toolCalls ?? []).some((c) => c.arguments.length > 8e3);
+      const wait = heavy ? 200 : TOOL_DELTA_THROTTLE_MS;
       const now = Date.now();
-      if (nameAppeared || now - lastEmitAt >= TOOL_DELTA_THROTTLE_MS) {
+      if (nameAppeared || now - lastToolEmitAt >= wait) {
         emitSnapshot();
         return;
       }
-      pending = true;
+      toolsPending = true;
     },
     flush() {
-      if (pending || live.toolCalls?.length) emitSnapshot();
+      flushText();
+      if (toolsPending || live.toolCalls?.length) emitSnapshot();
     }
   };
 }
@@ -2845,6 +2971,7 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
       }
     }
     streamDeltas.flush();
+    await yieldToUi();
     live.streaming = false;
     live.content = completion.content.trim();
     live.thinking = completion.reasoning.trim() || live.thinking;
@@ -2871,6 +2998,7 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
     }
     if (completion.toolCalls.length) {
       for (const call of completion.toolCalls) {
+        await yieldToUi();
         const args = parseArgs(call.function.arguments || "{}");
         if (call.function.name === "ask_clarification") {
           const options = Array.isArray(args.options) ? args.options.filter((o) => o.label).map((o, i) => ({ id: o.id || `opt-${i}`, label: String(o.label) })) : void 0;
@@ -3296,8 +3424,19 @@ async function resumeWithToolResult(session, projectRoot, ctx, toolCallId, resul
 function clone(v) {
   return JSON.parse(JSON.stringify(v));
 }
+function publish(session) {
+  return session ? sessionForRenderer(session) : null;
+}
 function emitDelta(event, payload) {
-  event.sender.send("studio:agent-delta", clone(payload));
+  if (payload && typeof payload === "object" && payload.kind === "session" && payload.session) {
+    const sessionPayload = payload;
+    event.sender.send("studio:agent-delta", {
+      ...sessionPayload,
+      session: sessionForRenderer(sessionPayload.session)
+    });
+    return;
+  }
+  event.sender.send("studio:agent-delta", payload);
 }
 const agentTurns = /* @__PURE__ */ new Map();
 function startAgentTurn(sessionId) {
@@ -3336,13 +3475,10 @@ function registerAgentHandlers() {
     "studio:agent-skills",
     () => AGENT_SKILLS.map((s) => ({ id: s.id, name: s.name }))
   );
-  electron.ipcMain.handle(
-    "studio:agent-list-sessions",
-    (_e, projectRoot) => clone(listSessions(projectRoot))
-  );
+  electron.ipcMain.handle("studio:agent-list-sessions", (_e, projectRoot) => listSessions(projectRoot));
   electron.ipcMain.handle(
     "studio:agent-create-session",
-    (_e, payload) => clone(
+    (_e, payload) => publish(
       createSession(payload.projectRoot, payload.moduleId || "project", payload.title, {
         skillId: payload.skillId,
         permissions: payload.permissions,
@@ -3352,15 +3488,15 @@ function registerAgentHandlers() {
   );
   electron.ipcMain.handle(
     "studio:agent-rename-session",
-    (_e, payload) => clone(renameSession(payload.projectRoot, payload.id, payload.title))
+    (_e, payload) => publish(renameSession(payload.projectRoot, payload.id, payload.title))
   );
   electron.ipcMain.handle(
     "studio:agent-duplicate-session",
-    (_e, payload) => clone(duplicateSession(payload.projectRoot, payload.id))
+    (_e, payload) => publish(duplicateSession(payload.projectRoot, payload.id))
   );
   electron.ipcMain.handle(
     "studio:agent-fork-session",
-    (_e, payload) => clone(
+    (_e, payload) => publish(
       forkSession(payload.projectRoot, payload.id, payload.throughMessageId, {
         mode: payload.mode,
         title: payload.title
@@ -3369,7 +3505,7 @@ function registerAgentHandlers() {
   );
   electron.ipcMain.handle(
     "studio:agent-rewind-session",
-    (_e, payload) => clone(
+    (_e, payload) => publish(
       rewindSession(payload.projectRoot, payload.id, payload.throughMessageId, {
         mode: payload.mode,
         exclusive: payload.exclusive
@@ -3378,7 +3514,7 @@ function registerAgentHandlers() {
   );
   electron.ipcMain.handle(
     "studio:agent-flag-session",
-    (_e, payload) => clone(setSessionFlag(payload.projectRoot, payload.id, payload.flag, payload.value))
+    (_e, payload) => publish(setSessionFlag(payload.projectRoot, payload.id, payload.flag, payload.value))
   );
   electron.ipcMain.handle(
     "studio:agent-delete-session",
@@ -3386,7 +3522,7 @@ function registerAgentHandlers() {
   );
   electron.ipcMain.handle(
     "studio:agent-load-session",
-    (_e, payload) => clone(loadSession(payload.projectRoot, payload.id))
+    (_e, payload) => publish(loadSession(payload.projectRoot, payload.id))
   );
   electron.ipcMain.handle(
     "studio:agent-chat",
@@ -3405,7 +3541,7 @@ function registerAgentHandlers() {
           },
           signal
         );
-        return clone(next);
+        return publish(next);
       } finally {
         finishAgentTurn(session.id, signal);
       }
@@ -3428,7 +3564,7 @@ function registerAgentHandlers() {
           payload.continueTurn !== false,
           signal
         );
-        return clone(next);
+        return publish(next);
       } finally {
         finishAgentTurn(session.id, signal);
       }
@@ -4624,6 +4760,11 @@ function stopLanguageServer() {
 }
 let mainWindow = null;
 let allowClose = false;
+let resolveBackendReady = () => {
+};
+const backendReady = new Promise((resolve) => {
+  resolveBackendReady = resolve;
+});
 function resolveAppIcon() {
   const candidates = [
     node_path.join(__dirname, "../../build/icon.png"),
@@ -4670,7 +4811,9 @@ function createWindow() {
     mainWindow?.webContents.send("studio:window-maximized-changed", false);
   });
   mainWindow.webContents.once("did-finish-load", () => {
-    startLanguageServer();
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) startLanguageServer();
+    }, 2e3);
   });
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -4686,16 +4829,7 @@ electron.app.whenReady().then(async () => {
   registerProjectHandlers(getWindow);
   registerAgentHandlers();
   registerGitHandlers();
-  try {
-    await initProjectIndex();
-  } catch (err) {
-    console.error("[studio] Failed to open project index:", err);
-  }
-  try {
-    registerParseHandlers();
-  } catch (err) {
-    console.error("[studio] Failed to register parse handlers:", err);
-  }
+  electron.ipcMain.handle("studio:backend-ready", () => backendReady);
   electron.ipcMain.on("studio:lsp-send", (_event, jsonBody) => {
     sendToLanguageServer(jsonBody);
   });
@@ -4716,6 +4850,22 @@ electron.app.whenReady().then(async () => {
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+  setTimeout(() => {
+    void (async () => {
+      try {
+        await initProjectIndex();
+      } catch (err) {
+        console.error("[studio] Failed to open project index:", err);
+      }
+      try {
+        registerParseHandlers();
+      } catch (err) {
+        console.error("[studio] Failed to register parse handlers:", err);
+      } finally {
+        resolveBackendReady();
+      }
+    })();
+  }, 0);
 });
 electron.app.on("window-all-closed", () => {
   stopLanguageServer();

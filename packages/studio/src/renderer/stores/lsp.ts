@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { startLanguageClient } from '../monaco/languageClient'
 
 export const useLspStore = defineStore('lsp', () => {
   const running = ref(false)
@@ -20,6 +19,7 @@ export const useLspStore = defineStore('lsp', () => {
   async function ensureClient(): Promise<void> {
     if (clientStarted || !running.value) return
     try {
+      const { startLanguageClient } = await import('../monaco/languageClient')
       await startLanguageClient()
       clientStarted = true
     } catch (err) {

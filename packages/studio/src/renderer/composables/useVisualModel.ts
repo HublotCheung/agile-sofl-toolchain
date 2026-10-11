@@ -21,6 +21,7 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
   const modelGen = ref(0)
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let visualPrimed = false
   let patchDebounceTimer: ReturnType<typeof setTimeout> | null = null
   let pendingPatch: {
     coalesceKey: string
@@ -90,13 +91,15 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
     if (source === lastRebuiltContent) return
 
     if (debounceTimer) clearTimeout(debounceTimer)
+    const delay = visualPrimed ? 300 : 800
+    visualPrimed = true
     debounceTimer = setTimeout(() => {
       debounceTimer = null
       const current = boundTab()
       if (!current || current.kind !== 'document') return
       if (current.content === lastRebuiltContent) return
       void rebuild(current.content, current.id, false)
-    }, 300)
+    }, delay)
   }
 
   async function applySourcePatch(

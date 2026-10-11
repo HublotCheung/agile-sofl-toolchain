@@ -23,6 +23,7 @@ describe('agent tool activity UX helpers', () => {
     expect(formatToolArgsSize('')).toBe('0 B')
     expect(formatToolArgsSize('hello')).toBe('5 B')
     expect(formatToolArgsSize('a'.repeat(2048))).toBe('2.0 KB')
+    expect(formatToolArgsSize('你')).toBe('3 B')
   })
 
   it('extracts view and operation count from complete or partial JSON', () => {
