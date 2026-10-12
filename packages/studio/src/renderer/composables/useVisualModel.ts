@@ -1,4 +1,4 @@
-import { ref, watch, computed, onUnmounted, type ComputedRef } from 'vue'
+import { ref, watch, computed, onUnmounted, shallowRef, type ComputedRef } from 'vue'
 import type {
   PatchDeclarationPayload,
   PatchFunctionPayload,
@@ -13,7 +13,7 @@ import { HistoryKinds } from '../history/kinds'
 export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
   const doc = useDocumentStore()
   const history = useHistoryStore()
-  const model = ref<VisualModelPayload | null>(null)
+  const model = shallowRef<VisualModelPayload | null>(null)
   const parseFailed = ref(false)
   const hasDiagnostics = ref(false)
   const loading = ref(false)
@@ -21,6 +21,7 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
   const modelGen = ref(0)
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
   let visualPrimed = false
   let patchDebounceTimer: ReturnType<typeof setTimeout> | null = null
   let pendingPatch: {
@@ -61,6 +62,10 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
     try {
       const result = await window.studio.buildVisualModel(source, tabId)
       if (gen !== requestGen) return
+      if (doc.hasPendingEdit(tabId)) {
+        scheduleRebuild()
+        return
+      }
       model.value = result
       parseFailed.value = result.parseFailed
       hasDiagnostics.value = result.hasDiagnostics ?? false
@@ -81,22 +86,27 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
     await rebuild(tab.content, tab.id, true)
   }
 
-  function scheduleRebuild(): void {
+  function scheduleRebuild(force = false): void {
+    if (disposed) return
     const tab = boundTab()
     if (!tab || tab.kind !== 'document') {
       model.value = null
       return
     }
-    const source = tab.content
-    if (source === lastRebuiltContent) return
+    if (!force && !doc.hasPendingEdit(tab.id) && tab.content === lastRebuiltContent) return
 
     if (debounceTimer) clearTimeout(debounceTimer)
     const delay = visualPrimed ? 300 : 800
     visualPrimed = true
     debounceTimer = setTimeout(() => {
       debounceTimer = null
+      if (disposed) return
       const current = boundTab()
       if (!current || current.kind !== 'document') return
+      if (doc.hasPendingEdit(current.id)) {
+        debounceTimer = setTimeout(() => scheduleRebuild(true), visualPrimed ? 300 : 800)
+        return
+      }
       if (current.content === lastRebuiltContent) return
       void rebuild(current.content, current.id, false)
     }, delay)
@@ -333,6 +343,7 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
   const unregisterFlusher = history.registerFlusher(() => flushScheduledPatch())
 
   onUnmounted(() => {
+    disposed = true
     unregisterFlusher()
     if (debounceTimer) clearTimeout(debounceTimer)
     if (patchDebounceTimer) clearTimeout(patchDebounceTimer)

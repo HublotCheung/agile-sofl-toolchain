@@ -134,6 +134,9 @@ function revealSpan(span: SerializableSpan, options?: { select?: boolean }): voi
 defineExpose({
   runEditCommand: runCommand,
   relayout,
+  flushToDocument() {
+    flushEditorToDocument()
+  },
   async formatDocument() {
     const { formatEditorInstance } = await import('../../composables/useFormatDocument')
     return formatEditorInstance(editor.value)
@@ -182,6 +185,14 @@ function applyEditorOptions(): void {
 
 let hybridDecorations: string[] = []
 let hybridTimer: ReturnType<typeof setTimeout> | null = null
+let hybridGen = 0
+let pushTimer: ReturnType<typeof setTimeout> | null = null
+let echoedEpoch = 0
+let editorDirty = false
+let unregisterHistoryFlush: (() => void) | null = null
+let unregisterContentBuffer: (() => void) | null = null
+
+const EDITOR_COMMIT_MS = 280
 
 const HYBRID_CLASS: Record<string, string> = {
   fsf: 'studio-hybrid-fsf',
@@ -198,7 +209,14 @@ async function refreshHybridDecorations(): Promise<void> {
     hybridDecorations = ed?.deltaDecorations(hybridDecorations, []) ?? []
     return
   }
-  const regions = await window.studio.buildHybridRegions(tab.content)
+  const gen = ++hybridGen
+  const source = tab.content
+  const regions = await window.studio.buildHybridRegions(source)
+  if (gen !== hybridGen || editor.value !== ed || activeDocumentTab.value?.content !== source) return
+  if (doc.hasPendingEdit(tab.id)) {
+    scheduleHybridDecorations()
+    return
+  }
   hybridDecorations = ed.deltaDecorations(
     hybridDecorations,
     regions.map((r: HybridRegionPayload) => ({
@@ -217,8 +235,17 @@ async function refreshHybridDecorations(): Promise<void> {
 }
 
 function scheduleHybridDecorations(): void {
+  if (editorDisposed) return
   if (hybridTimer) clearTimeout(hybridTimer)
-  hybridTimer = setTimeout(() => void refreshHybridDecorations(), 300)
+  hybridTimer = setTimeout(() => {
+    hybridTimer = null
+    const tab = activeDocumentTab.value
+    if (tab && doc.hasPendingEdit(tab.id)) {
+      scheduleHybridDecorations()
+      return
+    }
+    void refreshHybridDecorations()
+  }, 300)
 }
 
 function syncModel(): void {
@@ -283,23 +310,59 @@ function updateMarkerDiagnostics(): void {
   lsp.setErrorCount(items.filter((d) => d.severity === 'error').length)
 }
 
-function onContentChange(): void {
+function activeEpoch(): number {
+  const id = activeDocumentTab.value?.id
+  if (!id) return 0
+  return doc.contentEpochByTab[id] ?? 0
+}
+
+function flushEditorToDocument(): void {
+  if (pushTimer) {
+    clearTimeout(pushTimer)
+    pushTimer = null
+  }
   const tab = activeDocumentTab.value
   const ed = editor.value
-  if (!tab || !ed || suppressHistory || history.applying) return
-  const value = ed.getValue()
-  if (value !== tab.content) {
+  const tabId = tab?.id
+  try {
+    if (!tab || !ed || suppressHistory || history.applying || !editorDirty) return
+    const value = ed.getValue()
+    if (value === tab.content) {
+      editorDirty = false
+      return
+    }
     history.applyDocument(tab.id, value, {
       kind: historyKindForDocument(tab.documentKind),
       immediate: false
     })
+    editorDirty = false
+    echoedEpoch = activeEpoch()
     scheduleHybridDecorations()
+  } finally {
+    if (tabId) doc.endPendingEdit(tabId)
   }
+}
+
+function onContentChange(): void {
+  const tab = activeDocumentTab.value
+  const ed = editor.value
+  if (!tab || !ed || suppressHistory || history.applying) return
+  editorDirty = true
+  doc.beginPendingEdit(tab.id)
+  doc.markDirty(tab.id)
+  if (pushTimer) clearTimeout(pushTimer)
+  pushTimer = setTimeout(() => {
+    pushTimer = null
+    flushEditorToDocument()
+  }, EDITOR_COMMIT_MS)
 }
 
 let editorDisposed = false
 
 onMounted(() => {
+  echoedEpoch = activeEpoch()
+  unregisterHistoryFlush = history.registerFlusher(() => flushEditorToDocument())
+  unregisterContentBuffer = doc.registerContentBuffer(() => flushEditorToDocument())
   window.setTimeout(() => {
     if (!editorDisposed) void bootMonaco()
   }, 32)
@@ -339,6 +402,7 @@ async function bootMonaco(): Promise<void> {
       }
     })
     editor.value.onDidChangeModelContent(onContentChange)
+    editor.value.onDidBlurEditorText(() => flushEditorToDocument())
     syncModel()
     resizeObserver = new ResizeObserver(() => relayout())
     resizeObserver.observe(container.value.parentElement ?? container.value)
@@ -366,20 +430,19 @@ watch([() => doc.activeTabId, () => props.tabId], () => {
   highlightDecorations = editor.value?.deltaDecorations(highlightDecorations, []) ?? []
 })
 
-watch(
-  () => doc.documentTabs.map((t) => `${t.id}:${t.content}:${t.uri}`).join('\n'),
-  () => {
-    for (const tab of doc.documentTabs) {
-      const model = models.get(tab.id)
-      if (model && model.getValue() !== tab.content) {
-        suppressHistory = true
-        applyModelValue(model, tab.content)
-        model.pushStackElement()
-        suppressHistory = false
-      }
-    }
-  }
-)
+watch(activeEpoch, (epoch) => {
+  if (epoch === echoedEpoch) return
+  const tab = activeDocumentTab.value
+  const ed = editor.value
+  if (!tab || !ed) return
+  const model = models.get(tab.id)
+  if (!model || model.getValue() === tab.content) return
+  editorDirty = false
+  suppressHistory = true
+  applyModelValue(model, tab.content)
+  model.pushStackElement()
+  suppressHistory = false
+})
 
 watch([() => editorUi.showMinimap, () => editorUi.showLineNumbers], () => {
   applyEditorOptions()
@@ -398,6 +461,11 @@ watch(
 
 onUnmounted(() => {
   editorDisposed = true
+  unregisterHistoryFlush?.()
+  unregisterContentBuffer?.()
+  unregisterHistoryFlush = null
+  unregisterContentBuffer = null
+  if (!history.applying) flushEditorToDocument()
   resizeObserver?.disconnect()
   resizeObserver = null
   markerSub?.dispose()

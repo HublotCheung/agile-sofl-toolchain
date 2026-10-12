@@ -242,7 +242,7 @@ node names are processes in that module; store names are vars; ports match the p
     permissions.informal.write || permissions.hybrid.write
       ? `propose_source_edit is an escape hatch, not the default:
 - Prefer propose_changes / propose_hybrid_changes / propose_gui_changes / propose_refinement_step for almost every write.
-- Use source edit after CRUD fails, when leftover unparsed text remains, when inventory is empty/out of sync with the file, when Diagnostics lists syntax/parse errors CRUD cannot fix, or when you must fix text CRUD cannot express. For GUI pass target "gui". Do not replace the whole GUI document in one call; patch one screen.`
+- Use source edit after CRUD fails, when leftover unparsed text remains, when inventory is empty/out of sync with the file, when Diagnostics lists syntax/parse errors CRUD cannot fix, or when you must fix text CRUD cannot express. For GUI pass target "gui". Do not replace the whole GUI document in one call; patch one screen.
 - First call read_* with view=source (or read_refinement_state then source). Then replace a UNIQUE oldText snippet, append, or replace-document.
 - Informal atoms that you rewrite via source edit still need propose_refinement_step kind=FormalizePredicate or process ambiguity will not drop.
 - Do not retry the same failing CRUD patch. After two CRUD failures you MUST switch to propose_source_edit.`

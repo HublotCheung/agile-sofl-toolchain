@@ -531,6 +531,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     currentModuleHashes.value = { ...currentModuleHashes.value, [filePath]: hashes }
   }
 
+  let moduleSyncTimer: ReturnType<typeof setTimeout> | null = null
+
+  function scheduleModuleSync(): void {
+    if (moduleSyncTimer) clearTimeout(moduleSyncTimer)
+    moduleSyncTimer = setTimeout(() => {
+      moduleSyncTimer = null
+      if (doc.hasPendingEdit()) {
+        scheduleModuleSync()
+        return
+      }
+      void refreshHashes()
+      void resyncModulesFromOpenTabs()
+    }, 700)
+  }
+
   watch(
     () =>
       doc.documentTabs
@@ -538,8 +553,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         .map((t) => `${t.filePath}:${t.content.length}:${t.isDirty}`)
         .join('|'),
     () => {
-      void refreshHashes()
-      void resyncModulesFromOpenTabs()
+      scheduleModuleSync()
     }
   )
 

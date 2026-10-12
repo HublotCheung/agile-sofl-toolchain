@@ -61,7 +61,9 @@ onMounted(() => {
     if (timer) window.clearTimeout(timer)
   })
 })
-const { state: refinementState } = useRefinementState()
+const { state: refinementState } = useRefinementState(
+  computed(() => workspace.hybridMode === 'refine')
+)
 const hybridViewOptions = computed(() => [
   { id: 'code', label: t('workspace.codeTab') },
   { id: 'visual', label: t('workspace.visualTab') },
@@ -69,8 +71,13 @@ const hybridViewOptions = computed(() => [
 ])
 
 function onHybridMode(id: string): void {
-  workspace.hybridMode = id === 'code' || id === 'refine' ? id : 'visual'
-  if (id === 'code') {
+  const next = id === 'code' || id === 'refine' ? id : 'visual'
+  if (workspace.hybridMode === 'code' && next !== 'code') {
+    monacoRef.value?.flushToDocument()
+  }
+  workspace.hybridMode = next
+  if (next === 'visual') void visual?.rebuildNow()
+  if (next === 'code') {
     void nextTick(() => monacoRef.value?.relayout())
   }
 }
@@ -197,10 +204,7 @@ function onRevealSpan(span: SerializableSpan): void {
                 :active="workspace.hybridMode === 'code'"
               />
             </div>
-            <div
-              class="absolute inset-0"
-              :class="workspace.hybridMode === 'visual' ? 'z-10' : 'hidden'"
-            >
+            <div v-if="workspace.hybridMode === 'visual'" class="absolute inset-0 z-10">
               <VisualEditor
                 ref="visualRef"
                 hide-navigator
@@ -248,10 +252,7 @@ function onRevealSpan(span: SerializableSpan): void {
             :active="workspace.hybridMode === 'code'"
           />
         </div>
-        <div
-          class="absolute inset-0"
-          :class="workspace.hybridMode === 'visual' ? 'z-10' : 'hidden'"
-        >
+        <div v-if="workspace.hybridMode === 'visual'" class="absolute inset-0 z-10">
           <VisualEditor
             ref="visualRef"
             hide-navigator

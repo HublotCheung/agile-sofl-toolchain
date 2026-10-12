@@ -13,9 +13,16 @@ import {
 import { useRecentFilesStore } from './recentFiles'
 import { persistWorkspace, restoreWorkspace } from './workspaceSession'
 
+const SESSION_PERSIST_MS = 1200
+
 export const useDocumentStore = defineStore('document', () => {
   const tabs = ref<EditorTab[]>([createHomeTab()])
   const activeTabId = ref<string>(HOME_TAB_ID)
+  /** Per-tab text generation. Listeners compare a number instead of copying the source. */
+  const contentEpochByTab = ref<Record<string, number>>({})
+  const contentBuffers = new Set<() => void>()
+  const pendingEditIds = new Set<string>()
+  let persistTimer: ReturnType<typeof setTimeout> | null = null
 
   const homeTab = computed(() => tabs.value.find((t) => t.kind === 'home') ?? null)
   const documentTabs = computed(() => tabs.value.filter((t) => t.kind === 'document'))
@@ -46,8 +53,63 @@ export const useDocumentStore = defineStore('document', () => {
     return true
   }
 
-  function saveSession(): void {
+  function cancelScheduledPersist(): void {
+    if (!persistTimer) return
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+
+  function persistNow(): void {
+    cancelScheduledPersist()
     persistWorkspace(activeTabId.value, tabs.value)
+  }
+
+  function schedulePersist(): void {
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = setTimeout(() => {
+      persistTimer = null
+      if (pendingEditIds.size > 0) {
+        schedulePersist()
+        return
+      }
+      persistWorkspace(activeTabId.value, tabs.value)
+    }, SESSION_PERSIST_MS)
+  }
+
+  function registerContentBuffer(fn: () => void): () => void {
+    contentBuffers.add(fn)
+    return () => {
+      contentBuffers.delete(fn)
+    }
+  }
+
+  function flushContentBuffers(): void {
+    for (const fn of [...contentBuffers]) fn()
+  }
+
+  function beginPendingEdit(id: string): void {
+    pendingEditIds.add(id)
+  }
+
+  function endPendingEdit(id: string): void {
+    pendingEditIds.delete(id)
+  }
+
+  function hasPendingEdit(id?: string): boolean {
+    if (id) return pendingEditIds.has(id)
+    return pendingEditIds.size > 0
+  }
+
+  function bumpContentEpoch(id: string): void {
+    contentEpochByTab.value = {
+      ...contentEpochByTab.value,
+      [id]: (contentEpochByTab.value[id] ?? 0) + 1
+    }
+  }
+
+  function saveSession(): void {
+    flushContentBuffers()
+    persistNow()
   }
 
   function setActive(id: string): void {
@@ -67,16 +129,26 @@ export const useDocumentStore = defineStore('document', () => {
     })
     tabs.value.push(tab)
     activeTabId.value = tab.id
-    saveSession()
+    persistNow()
     return tab
+  }
+
+  function markDirty(id: string): void {
+    const tab = tabs.value.find((t) => t.id === id)
+    if (!tab || tab.kind !== 'document' || tab.isDirty) return
+    tab.isDirty = true
   }
 
   function setContent(id: string, content: string, dirty = true): void {
     const tab = tabs.value.find((t) => t.id === id)
     if (!tab || tab.kind !== 'document') return
-    tab.content = content
-    tab.isDirty = dirty
-    saveSession()
+    const contentChanged = tab.content !== content
+    const dirtyChanged = tab.isDirty !== dirty
+    if (!contentChanged && !dirtyChanged) return
+    if (contentChanged) tab.content = content
+    if (dirtyChanged) tab.isDirty = dirty
+    if (contentChanged) bumpContentEpoch(tab.id)
+    schedulePersist()
   }
 
   function openFromFile(filePath: string, content: string, title: string): EditorTab {
@@ -89,26 +161,32 @@ export const useDocumentStore = defineStore('document', () => {
     if (existing) {
       activeTabId.value = existing.id
       if (!existing.isDirty) {
+        const contentChanged = existing.content !== content
         existing.content = content
         existing.title = title
         existing.uri = pathToFileUri(filePath)
-        saveSession()
+        if (contentChanged) bumpContentEpoch(existing.id)
+        persistNow()
       }
       return existing
     }
     const tab = createDocumentTab({ filePath, content, title, isDirty: false, documentKind: inferDocumentKind(filePath) })
     tabs.value.push(tab)
     activeTabId.value = tab.id
-    saveSession()
+    bumpContentEpoch(tab.id)
+    persistNow()
     return tab
   }
 
   function updateContent(id: string, content: string): void {
     const tab = tabs.value.find((t) => t.id === id)
     if (!tab || tab.kind !== 'document') return
+    if (tab.content === content && tab.isDirty) return
+    const contentChanged = tab.content !== content
     tab.content = content
     tab.isDirty = true
-    saveSession()
+    if (contentChanged) bumpContentEpoch(tab.id)
+    schedulePersist()
   }
 
   function markSaved(id: string, filePath: string, title: string): void {
@@ -119,7 +197,7 @@ export const useDocumentStore = defineStore('document', () => {
     tab.isDirty = false
     tab.uri = pathToFileUri(filePath)
     useRecentFilesStore().add(filePath, title)
-    saveSession()
+    persistNow()
   }
 
   function removeTab(id: string): void {
@@ -127,6 +205,7 @@ export const useDocumentStore = defineStore('document', () => {
     const idx = tabs.value.findIndex((t) => t.id === id)
     if (idx === -1) return
     tabs.value.splice(idx, 1)
+    pendingEditIds.delete(id)
 
     if (activeTabId.value === id) {
       const remainingDocs = documentTabs.value
@@ -137,7 +216,7 @@ export const useDocumentStore = defineStore('document', () => {
       }
     }
     ensureHomeTab()
-    saveSession()
+    persistNow()
   }
 
   function closeTabsOutsideRoot(rootPath: string): void {
@@ -152,12 +231,13 @@ export const useDocumentStore = defineStore('document', () => {
     const asfl = tabs.value.find((t) => t.id === asflTabId)
     if (aspec) aspec.linkedDocumentId = asflTabId
     if (asfl) asfl.linkedDocumentId = aspecTabId
-    saveSession()
+    persistNow()
   }
 
   return {
     tabs,
     activeTabId,
+    contentEpochByTab,
     homeTab,
     documentTabs,
     activeTab,
@@ -170,6 +250,12 @@ export const useDocumentStore = defineStore('document', () => {
     setActive,
     goHome,
     newTab,
+    markDirty,
+    beginPendingEdit,
+    endPendingEdit,
+    hasPendingEdit,
+    registerContentBuffer,
+    flushContentBuffers,
     setContent,
     openFromFile,
     updateContent,

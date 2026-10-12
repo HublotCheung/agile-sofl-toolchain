@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useDocumentStore } from '../src/renderer/stores/document'
 import { HOME_TAB_ID } from '../src/renderer/stores/tabUtils'
@@ -93,6 +93,37 @@ describe('document store', () => {
     doc.linkTabs(aspec.id, asfl.id)
     expect(doc.tabs.find((t) => t.id === aspec.id)?.linkedDocumentId).toBe(asfl.id)
     expect(doc.tabs.find((t) => t.id === asfl.id)?.linkedDocumentId).toBe(aspec.id)
+  })
+
+  it('does not write the session snapshot on every content change', () => {
+    vi.useFakeTimers()
+    try {
+      const doc = useDocumentStore()
+      const tab = doc.openFromFile('/proj/spec.asfl', 'module A;\nend_module', 'spec.asfl')
+      sessionStorage.clear()
+      doc.setContent(tab.id, 'module A;\nend_module\nprocess P()\nend_process')
+      expect(sessionStorage.getItem('studio-workspace-session')).toBeNull()
+      expect(doc.contentEpochByTab[tab.id]).toBeGreaterThan(0)
+      vi.advanceTimersByTime(1200)
+      const raw = sessionStorage.getItem('studio-workspace-session')
+      expect(raw).toContain('process P()')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('marks a tab dirty without copying its text', () => {
+    const doc = useDocumentStore()
+    const tab = doc.openFromFile('/proj/spec.asfl', 'module A;\nend_module', 'spec.asfl')
+    const epoch = doc.contentEpochByTab[tab.id] ?? 0
+    doc.markDirty(tab.id)
+    expect(tab.isDirty).toBe(true)
+    expect(tab.content).toBe('module A;\nend_module')
+    expect(doc.contentEpochByTab[tab.id] ?? 0).toBe(epoch)
+    doc.beginPendingEdit(tab.id)
+    expect(doc.hasPendingEdit(tab.id)).toBe(true)
+    doc.endPendingEdit(tab.id)
+    expect(doc.hasPendingEdit()).toBe(false)
   })
 
   it('infers aspec document kind from file path', () => {

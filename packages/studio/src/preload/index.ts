@@ -171,9 +171,11 @@ const studio = {
   moduleHashes: (source: string) =>
     ipcRenderer.invoke('studio:module-hashes', source) as Promise<Record<string, string>>,
   modulesFromSource: (payload: { source: string; filePath: string; guiModule?: string }) =>
-    ipcRenderer.invoke('studio:modules-from-source', JSON.parse(JSON.stringify(payload))) as Promise<
-      ProjectModuleInfo[]
-    >,
+    ipcRenderer.invoke('studio:modules-from-source', {
+      source: payload.source,
+      filePath: payload.filePath,
+      guiModule: payload.guiModule
+    }) as Promise<ProjectModuleInfo[]>,
   projectList: () => ipcRenderer.invoke('studio:project-list') as Promise<IndexedProject[]>,
   projectCreate: (name: string) =>
     ipcRenderer.invoke('studio:project-create', name) as Promise<{
@@ -407,7 +409,10 @@ const studio = {
       repairNotes?: string[]
     }>,
   refinementState: (payload: { source: string; projectRoot: string }) =>
-    ipcRenderer.invoke('studio:refinement-state', JSON.parse(JSON.stringify(payload))) as Promise<unknown>,
+    ipcRenderer.invoke('studio:refinement-state', {
+      source: payload.source,
+      projectRoot: payload.projectRoot
+    }) as Promise<unknown>,
   gitIsRepo: (rootPath: string) => ipcRenderer.invoke('studio:git-is-repo', rootPath) as Promise<boolean>,
   gitStatus: (rootPath: string) =>
     ipcRenderer.invoke('studio:git-status', rootPath) as Promise<{

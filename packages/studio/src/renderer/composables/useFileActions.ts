@@ -1,6 +1,7 @@
 import { useI18n } from 'vue-i18n'
 import { refreshGitFor } from './useGitStatus'
 import { useDocumentStore } from '../stores/document'
+import { useHistoryStore } from '../stores/history'
 import { useModalStore } from '../stores/modal'
 import { useWorkspaceStore } from '../stores/workspace'
 import { HOME_TAB_ID } from '../stores/tabUtils'
@@ -11,6 +12,7 @@ export function useFileActions() {
   const modal = useModalStore()
 
   async function saveTab(tabId?: string): Promise<boolean> {
+    await useHistoryStore().flushRegistered()
     const tab = tabId ? doc.tabs.find((x) => x.id === tabId) : doc.activeTab
     if (!tab || tab.kind !== 'document') return false
 
@@ -57,6 +59,7 @@ export function useFileActions() {
   }
 
   async function saveAsTab(): Promise<boolean> {
+    await useHistoryStore().flushRegistered()
     const tab = doc.activeTab
     if (!tab || tab.kind !== 'document') return false
     const ext =

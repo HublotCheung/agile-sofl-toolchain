@@ -437,6 +437,302 @@ function registerFileHandlers(getWindow2) {
 function joinLastDir(dir, name) {
   return node_path.join(dir, name);
 }
+const MAX_TEXT_SEARCH_MATCHES = 5e3;
+function normalizePathKey(filePath) {
+  let normalized = filePath.replace(/\\/g, "/");
+  if (/^[a-zA-Z]:/.test(normalized)) normalized = normalized[0].toLowerCase() + normalized.slice(1);
+  else if (normalized.startsWith("/")) normalized = normalized.toLowerCase();
+  return normalized;
+}
+function toRelativePath(root, filePath) {
+  const rootKey = normalizePathKey(root).replace(/\/$/, "");
+  const fileSlash = filePath.replace(/\\/g, "/");
+  const fileKey = normalizePathKey(filePath);
+  if (fileKey === rootKey) return "";
+  if (fileKey.startsWith(`${rootKey}/`)) {
+    return fileSlash.slice(fileSlash.length - (fileKey.length - rootKey.length - 1));
+  }
+  return fileSlash;
+}
+function editorDocumentKind(filePath) {
+  const path = filePath.replace(/\\/g, "/").toLowerCase();
+  if (path.endsWith(".aspec")) return "aspec";
+  if (path.endsWith(".asfl")) return "asfl";
+  if (path.endsWith(".guispec") || path.endsWith(".gui.html") || path.endsWith("/gui.html")) {
+    return "guispec";
+  }
+  return null;
+}
+function isEditorDocumentPath(filePath) {
+  return editorDocumentKind(filePath) != null;
+}
+function splitGlobList(raw) {
+  return raw.split(",").map((part) => part.trim()).filter(Boolean);
+}
+function globToRegExp(pattern) {
+  let out = "";
+  const source = pattern.replace(/\\/g, "/");
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "*") {
+      if (source[i + 1] === "*") {
+        if (source[i + 2] === "/") {
+          out += "(?:.*/?)";
+          i += 2;
+        } else {
+          out += ".*";
+          i += 1;
+        }
+      } else {
+        out += "[^/]*";
+      }
+      continue;
+    }
+    if (ch === "?") {
+      out += "[^/]";
+      continue;
+    }
+    out += /[\\^$+?.()|[\]{}]/.test(ch) ? `\\${ch}` : ch;
+  }
+  return new RegExp(`^(?:${out})$`, "i");
+}
+function matchGlob(relativePath, pattern) {
+  const rel = relativePath.replace(/\\/g, "/").replace(/^\.\//, "");
+  const pat = pattern.trim().replace(/\\/g, "/");
+  if (!pat || pat === "**" || pat === "**/*") return true;
+  if (globToRegExp(pat).test(rel)) return true;
+  if (!pat.includes("/")) {
+    const base = rel.slice(rel.lastIndexOf("/") + 1);
+    if (globToRegExp(pat).test(base)) return true;
+  }
+  return false;
+}
+function pathAllowed(relativePath, include, exclude) {
+  const includes = splitGlobList(include);
+  const excludes = splitGlobList(exclude);
+  if (includes.length > 0 && !includes.some((glob) => matchGlob(relativePath, glob))) return false;
+  if (excludes.some((glob) => matchGlob(relativePath, glob))) return false;
+  return true;
+}
+function escapeRegExp(value) {
+  return value.replace(/[\\^$+?.()|[\]{}]/g, "\\$&");
+}
+function compileSearch(query) {
+  const raw = query.query;
+  if (!raw) return { error: "empty" };
+  let pattern = query.useRegex ? raw : escapeRegExp(raw);
+  if (query.wholeWord) {
+    pattern = `(?<![\\p{L}\\p{N}_])(?:${pattern})(?![\\p{L}\\p{N}_])`;
+  }
+  const flags = `${query.matchCase ? "" : "i"}gu`;
+  try {
+    return { re: new RegExp(pattern, flags) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "invalid" };
+  }
+}
+function buildPreview(lineText, matchStart, matchEnd) {
+  const max = 180;
+  if (lineText.length <= max) {
+    return { preview: lineText, previewStart: matchStart, previewEnd: matchEnd };
+  }
+  const radius = 70;
+  const from = Math.max(0, matchStart - radius);
+  const to = Math.min(lineText.length, matchEnd + radius);
+  const prefix = from > 0;
+  const suffix = to < lineText.length;
+  const preview = `${prefix ? "…" : ""}${lineText.slice(from, to)}${suffix ? "…" : ""}`;
+  const shift = (prefix ? 1 : 0) - from;
+  return {
+    preview,
+    previewStart: matchStart + shift,
+    previewEnd: matchEnd + shift
+  };
+}
+function searchInText(content, re, limit) {
+  const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
+  const regex = new RegExp(re.source, flags);
+  const matches = [];
+  let truncated = false;
+  let found;
+  while (found = regex.exec(content)) {
+    if (found[0].length === 0) {
+      regex.lastIndex += 1;
+      continue;
+    }
+    if (matches.length >= limit) {
+      truncated = true;
+      break;
+    }
+    const start = found.index;
+    const end = start + found[0].length;
+    const lineStart = content.lastIndexOf("\n", start - 1) + 1;
+    const lineEndIdx = content.indexOf("\n", end);
+    const lineEnd = lineEndIdx === -1 ? content.length : lineEndIdx;
+    const lineText = content.slice(lineStart, lineEnd).replace(/\r$/, "");
+    const line = content.slice(0, start).split("\n").length;
+    const column = start - lineStart + 1;
+    const inLineStart = start - lineStart;
+    const inLineEnd = Math.min(lineText.length, end - lineStart);
+    const preview = buildPreview(lineText, inLineStart, inLineEnd);
+    const groups = [];
+    for (let i = 0; i < found.length; i++) groups.push(found[i] ?? "");
+    matches.push({
+      line,
+      column,
+      start,
+      end,
+      text: found[0],
+      groups,
+      ...preview
+    });
+  }
+  return { matches, truncated };
+}
+const SKIP_DIRS$1 = /* @__PURE__ */ new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "out",
+  "release",
+  "coverage",
+  ".vite"
+]);
+const BINARY_EXT = /* @__PURE__ */ new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "ico",
+  "bmp",
+  "exe",
+  "dll",
+  "wasm",
+  "pdf",
+  "zip",
+  "gz",
+  "7z",
+  "woff",
+  "woff2",
+  "ttf",
+  "eot",
+  "mp3",
+  "mp4",
+  "mov",
+  "avi",
+  "bin",
+  "obj",
+  "class",
+  "jar",
+  "pyc",
+  "sqlite",
+  "db"
+]);
+const MAX_FILE_BYTES = 1e6;
+const MAX_FILES = 4e3;
+function extensionOf(name) {
+  const base = name.replace(/\\/g, "/").split("/").pop() ?? name;
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return "";
+  return base.slice(dot + 1).toLowerCase();
+}
+function readTextFile(filePath) {
+  const ext = extensionOf(filePath);
+  if (ext && BINARY_EXT.has(ext)) return null;
+  let size = 0;
+  try {
+    size = node_fs.statSync(filePath).size;
+  } catch {
+    return null;
+  }
+  if (size <= 0 || size > MAX_FILE_BYTES) return null;
+  let content;
+  try {
+    content = node_fs.readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+  if (content.includes("\0")) return null;
+  return content;
+}
+function searchProjectFiles(request) {
+  const root = request.root;
+  if (!root) return { files: [], truncated: false, error: null };
+  const compiled = compileSearch(request);
+  if ("error" in compiled) {
+    if (compiled.error === "empty") return { files: [], truncated: false, error: null };
+    return { files: [], truncated: false, error: compiled.error };
+  }
+  const skip = new Set((request.skipPaths ?? []).map((path) => normalizePathKey(path)));
+  const files = [];
+  let truncated = false;
+  let remaining = MAX_TEXT_SEARCH_MATCHES;
+  let seenFiles = 0;
+  const walk = (dir) => {
+    if (truncated) return;
+    let entries;
+    try {
+      entries = node_fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (truncated) return;
+      if (entry.isSymbolicLink()) continue;
+      const full = node_path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS$1.has(entry.name)) continue;
+        walk(full);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      seenFiles += 1;
+      if (seenFiles > MAX_FILES) {
+        truncated = true;
+        return;
+      }
+      if (skip.has(normalizePathKey(full))) continue;
+      const relative = toRelativePath(root, full);
+      if (!pathAllowed(relative, request.include, request.exclude)) continue;
+      const content = readTextFile(full);
+      if (content == null) continue;
+      const found = searchInText(content, compiled.re, remaining);
+      if (!found.matches.length) continue;
+      remaining -= found.matches.length;
+      if (found.truncated) truncated = true;
+      files.push({
+        path: full,
+        replaceable: isEditorDocumentPath(full),
+        matches: found.matches
+      });
+      if (remaining <= 0) {
+        truncated = true;
+        return;
+      }
+    }
+  };
+  walk(root);
+  files.sort((a, b) => toRelativePath(root, a.path).localeCompare(toRelativePath(root, b.path)));
+  return { files, truncated, error: null };
+}
+function registerTextSearchHandlers() {
+  electron.ipcMain.handle("studio:search-project-text", (_event, payload) => {
+    if (!payload || typeof payload.root !== "string") {
+      return { files: [], truncated: false, error: null };
+    }
+    return searchProjectFiles({
+      root: payload.root,
+      query: String(payload.query ?? ""),
+      matchCase: Boolean(payload.matchCase),
+      wholeWord: Boolean(payload.wholeWord),
+      useRegex: Boolean(payload.useRegex),
+      include: String(payload.include ?? ""),
+      exclude: String(payload.exclude ?? ""),
+      skipPaths: Array.isArray(payload.skipPaths) ? payload.skipPaths.map((path) => String(path)) : []
+    });
+  });
+}
 function registerWindowHandlers(getWindow2) {
   electron.ipcMain.handle("studio:window-minimize", () => {
     getWindow2()?.minimize();
@@ -540,11 +836,11 @@ function toPublicProfile(profile, activeId) {
     active: profile.id === activeId
   };
 }
-function asRecord(value) {
+function asRecord$1(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
 function parseProfile(raw, fallbackId) {
-  const object = asRecord(raw);
+  const object = asRecord$1(raw);
   if (!object) return null;
   const baseUrl = typeof object.baseUrl === "string" ? normalizeBaseUrl(object.baseUrl) : "";
   const apiKey = typeof object.apiKey === "string" ? object.apiKey : "";
@@ -572,7 +868,7 @@ function parseLlmImport(raw) {
     if (!profiles.length) throw new Error("No LLM profiles in JSON array");
     return { mode: "append", profiles };
   }
-  const object = asRecord(value);
+  const object = asRecord$1(value);
   if (object && Array.isArray(object.profiles)) {
     const profiles = object.profiles.map((item, index) => parseProfile(item, `llm-import-${index}`)).filter((item) => Boolean(item));
     if (!profiles.length) throw new Error("No LLM profiles in dump");
@@ -1012,7 +1308,7 @@ Pipeline — keep going after each applied patch until every enabled stage is do
 4. Per module: add process signatures from Functions (kind=process).
 5. Per process: replace-process-body or add scenarios. Write the FSF (FSF : T1 && D1 || T2 && D2 || … || others && Dn); Ti/Di may be structured natural language at this stage. Enumerations use {<Tag>}.
 6. Add invariants (kind=inv) from Constraints. Do NOT dump GUI widgets into Hybrid CRUD.
-7. For UI, call read_gui_specification then propose_gui_changes. Each screen is its own HTML page (data-screen) with data-nav to sibling screens so the prototype can click-switch. Build a high-fidelity HTML prototype (shell, sidebar, hero, cards, forms, lists, empty states) — not a page of three buttons. Use whitelist tags plus any as-* class. Bind with data-process / data-bind / data-nav. Prefer replace-screen-html with the full inner layout of that one screen. Hybrid gui blocks stay as slim screen→process traces.
+7. For UI, call read_gui_specification then propose_gui_changes. Each screen is its own HTML page (data-screen) with data-nav to sibling screens so the prototype can click-switch. ONE screen per call — a multi-screen payload is truncated and rejected. Build a high-fidelity HTML prototype (shell, sidebar, hero, cards, forms, lists, empty states) — not a page of three buttons. Use whitelist tags plus any as-* class. Bind with data-process / data-bind / data-nav. Prefer replace-screen-html with the full inner layout of that one screen. Inline <script type="text/as-logic"> may compute or animate inside that screen (price ticks, counters); it cannot reload the host app. Hybrid gui blocks stay as slim screen→process traces.
 After every applied write, call read_hybrid_specification / read_gui_specification and fix gaps until inventories are correct.
 8. Three-line refinement is a later stage, not automatic. After enabled Hybrid/GUI stages finish, call read_refinement_state. If unambiguous=false, ask_clarification with 2–4 next slices (empty module, stub process, FormalizePredicate, data retrieve, operational grain). Do not refine the entire tree in one go. Do not claim the specification has no ambiguity while empty modules, stubs, processAmbiguity, dataAmbiguity, or grainAmbiguity remain. Grain questions may only use variations already listed in the digest.
 Last message = summary of completed generation stages plus remaining refinement gaps.
@@ -1081,7 +1377,7 @@ const AGENT_TOOLS = [
                 op: { type: "string", enum: ["add", "update", "remove", "move"] },
                 target: {
                   type: "string",
-                  description: "add only: functions | data-resources | constraints, or a parent node id (for nested fields)."
+                  description: "add only: functions | data-resources | constraints, or a parent node id. Depth is unlimited."
                 },
                 id: {
                   type: "string",
@@ -1099,7 +1395,12 @@ const AGENT_TOOLS = [
                       enum: ["function", "data-resource", "data-field", "constraint", "text"]
                     },
                     title: { type: "string" },
-                    description: { type: "string" }
+                    description: { type: "string" },
+                    children: {
+                      type: "array",
+                      description: "Optional nested nodes. Each item repeats type, title, description, and children.",
+                      items: { type: "object" }
+                    }
                   }
                 }
               },
@@ -1275,7 +1576,7 @@ const AGENT_TOOLS = [
     type: "function",
     function: {
       name: "propose_gui_changes",
-      description: "Propose a structured GUI HTML patch. Prefer replace-screen-html with a complete inner layout (navbar/sidebar/hero/cards/forms/tables), not a single button. Ops: add-screen (optional html), remove-screen, add-widget, replace-html, replace-screen-html, insert-html, patch-node, remove-node. Whitelist HTML5 tags; any as-* class is allowed. Bind with data-process / data-bind / data-nav. Never emit <script>, style=, href, or src.",
+      description: 'Propose a structured GUI HTML patch. ONE screen per call (replace-screen-html or add-screen) with a complete inner layout (navbar/sidebar/hero/cards/forms/tables), not a single button and not every screen at once. Ops: add-screen (optional html), remove-screen, add-widget, replace-html, replace-screen-html, insert-html, patch-node, remove-node. Whitelist HTML5 tags; any as-* class is allowed. Bind with data-process / data-bind / data-nav. Inline <script type="text/as-logic"> is allowed for calculations and animations and runs in a sandbox. Also allowed: onclick, oninput, onchange. Never emit <script src>, style=, href, or src.',
       parameters: {
         type: "object",
         properties: {
@@ -1365,13 +1666,13 @@ const AGENT_TOOLS = [
     type: "function",
     function: {
       name: "propose_source_edit",
-      description: "Last-resort source-level edit of Informal markdown or Hybrid .asfl. Prefer propose_changes / propose_hybrid_changes. Use this only when CRUD failed, leftover unparsed text remains, inventory is empty/out of sync, or you must fix text the structured tools cannot express. Read view=source first. Ops: replace (unique oldText → newText; all:true to replace every match), append, replace-document.",
+      description: 'Last-resort source-level edit of Informal markdown, Hybrid .asfl, or GUI html. Prefer propose_changes / propose_hybrid_changes / propose_gui_changes. Use this only when CRUD failed, leftover unparsed text remains, inventory is empty/out of sync, or you must fix text the structured tools cannot express. Read view=source first. Pass target "gui" for the GUI file and edit one screen, not the whole document. Ops: replace (unique oldText → newText; all:true to replace every match), append, replace-document.',
       parameters: {
         type: "object",
         properties: {
           target: {
             type: "string",
-            enum: ["informal", "hybrid"],
+            enum: ["informal", "hybrid", "gui"],
             description: "Which open specification file to edit"
           },
           explanation: { type: "string" },
@@ -2390,6 +2691,148 @@ function failedToolResult(error, userNote) {
     ].filter(Boolean).join(" ")
   });
 }
+function asRecord(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value;
+}
+function sliceFirstJsonValue(raw) {
+  const obj = raw.indexOf("{");
+  const arr = raw.indexOf("[");
+  let start = -1;
+  if (obj < 0) start = arr;
+  else if (arr < 0) start = obj;
+  else start = Math.min(obj, arr);
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < raw.length; i++) {
+    const c = raw[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') {
+      inStr = true;
+      continue;
+    }
+    if (c === "{" || c === "[") depth += 1;
+    else if (c === "}" || c === "]") {
+      depth -= 1;
+      if (depth === 0) return raw.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+function closeTruncatedJson(raw) {
+  const start = raw.indexOf("{");
+  if (start < 0) return null;
+  const source = raw.slice(start);
+  const stack = [];
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') {
+      inStr = true;
+      continue;
+    }
+    if (c === "{") stack.push("}");
+    else if (c === "[") stack.push("]");
+    else if ((c === "}" || c === "]") && stack[stack.length - 1] === c) stack.pop();
+  }
+  let text = source;
+  if (inStr) {
+    if (text.endsWith("\\")) text += "\\";
+    text += '"';
+  }
+  text = text.replace(/,\s*$/, "");
+  while (stack.length) text += stack.pop();
+  return { text, closedString: inStr };
+}
+function tryParse(text) {
+  try {
+    return asRecord(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+function inflateOperations(value) {
+  if (typeof value.operations !== "string") return;
+  const raw = value.operations.trim();
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      value.operations = parsed;
+      return;
+    }
+    const record = asRecord(parsed);
+    if (record && Array.isArray(record.operations)) value.operations = record.operations;
+  } catch {
+    const closed = closeTruncatedJson(raw.startsWith("{") ? raw : `{"operations":${raw}`);
+    if (!closed) return;
+    const parsed = tryParse(closed.text);
+    if (parsed && Array.isArray(parsed.operations)) value.operations = parsed.operations;
+  }
+}
+function dropPartialOperation(value) {
+  const ops = value.operations;
+  if (!Array.isArray(ops) || ops.length < 2) return false;
+  ops.pop();
+  return true;
+}
+function truncatedWholeDocument(value) {
+  const ops = value.operations;
+  if (!Array.isArray(ops) || ops.length !== 1) return false;
+  const op = asRecord(ops[0]);
+  if (!op) return false;
+  const kind = String(op.op || op.action || "");
+  return kind === "replace-document" || kind === "replace-html";
+}
+function parseToolArguments(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, error: "Tool arguments were empty." };
+  const direct = tryParse(trimmed);
+  if (direct) {
+    inflateOperations(direct);
+    return { ok: true, value: direct, repaired: false, droppedPartialOperation: false };
+  }
+  const first = sliceFirstJsonValue(trimmed);
+  if (first && first.length < trimmed.length) {
+    const parsed = tryParse(first);
+    if (parsed) {
+      inflateOperations(parsed);
+      return { ok: true, value: parsed, repaired: true, droppedPartialOperation: false };
+    }
+  }
+  const closed = closeTruncatedJson(trimmed);
+  if (closed) {
+    const parsed = tryParse(closed.text);
+    if (parsed) {
+      inflateOperations(parsed);
+      if (closed.closedString && truncatedWholeDocument(parsed)) {
+        return {
+          ok: false,
+          error: `Tool arguments were truncated (${trimmed.length} characters) inside a whole-document replace. Do not resend that payload. Send one screen per propose_gui_changes call (add-screen or replace-screen-html).`
+        };
+      }
+      const dropped = closed.closedString ? dropPartialOperation(parsed) : false;
+      return { ok: true, value: parsed, repaired: true, droppedPartialOperation: dropped };
+    }
+  }
+  return {
+    ok: false,
+    error: `Tool arguments were malformed or truncated (${trimmed.length} characters). Do not resend the same payload. Split it into smaller calls — for GUI, one screen per propose_gui_changes.`
+  };
+}
 const MAX_HISTORY = 20;
 function permissionsOf(session, ctx) {
   return normalizePermissions(ctx.permissions ?? session.context.permissions);
@@ -2496,15 +2939,17 @@ function systemPrompt(ctx, permissions) {
     );
   }
   if (permissions.hybrid.write || permissions.informal.write) {
-    toolLines.push("- propose_gui_changes: GUI HTML structure patches — full-screen prototypes with as-* layout, not a few buttons");
+    toolLines.push(
+      '- propose_gui_changes: one GUI screen per call (full layout). Inline <script type="text/as-logic"> may animate that screen; it runs in a sandbox and cannot reload Studio'
+    );
   }
   if (permissions.informal.write || permissions.hybrid.write) {
     toolLines.push(
-      "- propose_source_edit: last-resort Informal/Hybrid source edit (replace/append/replace-document) when CRUD cannot unstick"
+      "- propose_source_edit: last-resort source edit (target informal, hybrid, or gui) when CRUD cannot unstick"
     );
   }
   const informalGuide = permissions.informal.write ? `For propose_changes, operate on the CURRENT Informal inventory (ids like fn-login, dr-account, c-unique):
-- add: target = functions | data-resources | constraints (or a parent node id). node.type = function | data-resource | data-field | constraint. Include title and description.
+- add: target = functions | data-resources | constraints, or any parent node id. Nesting depth is unlimited for functions, data sources (children are data-field), and constraints. node.type = function | data-resource | data-field | constraint. Include title and description. Optional node.children repeats the same shape.
 - update: id = existing node id (or unique title). Set title and/or description.
 - remove: id = existing node id.
 - move: id + parentId + optional afterId.
@@ -2532,13 +2977,15 @@ node names are processes in that module; store names are vars; ports match the p
   const guiGuide = permissions.hybrid.write || permissions.informal.write ? `For propose_gui_changes, design a high-fidelity product prototype the user can walk through:
 - Each screen should look like a finished app surface: shell/sidebar or navbar, hero or toolbar, cards/lists/tables/forms, badges, empty states, primary+secondary actions.
 - Each screen is a separate HTML page. Clicking data-nav must switch screens; the screen list follows. Do not put the whole app into one un-navigable view.
+- ONE screen per tool call (add-screen or replace-screen-html). A long multi-screen payload is often truncated and rejected. If a call is recovered after truncation, continue with the next screen in a new call.
 - Prefer replace-screen-html (or add-screen with html) with the FULL inner markup of that screen. All children are kept; do not flatten a layout down to the first widget.
 - Tags: common HTML5 (header/main/aside/nav/table/form/img/a/…). Classes: any as-* token (as-shell, as-hero, as-card, as-grid-3, as-btn-primary, …). Bind with data-process / data-bind / data-nav.
 - Do not ship a page that is only two or three unlabeled buttons. Navigation must be visible in the layout, not implied.
-- Never emit <script>, style=, href, or src.` : "You do not have GUI write permission. Do not call propose_gui_changes.";
+- Prototype logic may be an inline <script type="text/as-logic"> (calculations, setInterval / requestAnimationFrame number ticks, button feedback). It runs in a sandbox iframe: it can query and update the prototype DOM, and it cannot reload Studio, open windows, or use the network. Also allowed: onclick, oninput, onchange. Do not emit <script src>, javascript: URLs, href, src, or style=.
+- Buttons inside forms must not rely on form submit. Use type="button" plus data-nav / data-process, or a logic script.` : "You do not have GUI write permission. Do not call propose_gui_changes.";
   const sourceGuide = permissions.informal.write || permissions.hybrid.write ? `propose_source_edit is an escape hatch, not the default:
 - Prefer propose_changes / propose_hybrid_changes / propose_gui_changes / propose_refinement_step for almost every write.
-- Use source edit after CRUD fails, when leftover unparsed text remains, when inventory is empty/out of sync with the file, when Diagnostics lists syntax/parse errors CRUD cannot fix, or when you must fix text CRUD cannot express.
+- Use source edit after CRUD fails, when leftover unparsed text remains, when inventory is empty/out of sync with the file, when Diagnostics lists syntax/parse errors CRUD cannot fix, or when you must fix text CRUD cannot express. For GUI pass target "gui". Do not replace the whole GUI document in one call; patch one screen.
 - First call read_* with view=source (or read_refinement_state then source). Then replace a UNIQUE oldText snippet, append, or replace-document.
 - Informal atoms that you rewrite via source edit still need propose_refinement_step kind=FormalizePredicate or process ambiguity will not drop.
 - Do not retry the same failing CRUD patch. After two CRUD failures you MUST switch to propose_source_edit.` : "You do not have write permission for source edits.";
@@ -2681,13 +3128,6 @@ function toApiMessages(session, ctx, permissions, options) {
     });
   }
   return msgs;
-}
-function parseArgs(raw) {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
 }
 function settleFinishedToolCalls(session) {
   for (const msg of session.messages) {
@@ -2999,7 +3439,29 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
     if (completion.toolCalls.length) {
       for (const call of completion.toolCalls) {
         await yieldToUi();
-        const args = parseArgs(call.function.arguments || "{}");
+        const parsedArgs = parseToolArguments(call.function.arguments || "{}");
+        if (!parsedArgs.ok) {
+          session.messages.push({
+            id: call.id,
+            role: "tool",
+            content: JSON.stringify({
+              ok: false,
+              error: parsedArgs.error,
+              next: "Do not resend that payload. Split it into smaller tool calls and continue."
+            }),
+            timestamp: (/* @__PURE__ */ new Date()).toISOString()
+          });
+          live.content = live.content || parsedArgs.error;
+          markCallStatus(live, call.id, "error", sink);
+          continue;
+        }
+        const args = parsedArgs.value;
+        if (parsedArgs.droppedPartialOperation) {
+          const note = "Recovered a truncated tool call. The incomplete last operation was dropped. Continue the remaining work in a new, smaller call.";
+          args.explanation = typeof args.explanation === "string" && args.explanation.trim() ? `${args.explanation}
+
+${note}` : note;
+        }
         if (call.function.name === "ask_clarification") {
           const options = Array.isArray(args.options) ? args.options.filter((o) => o.label).map((o, i) => ({ id: o.id || `opt-${i}`, label: String(o.label) })) : void 0;
           live.content = String(args.question || live.content || "");
@@ -3029,7 +3491,7 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
           else if (call.function.name === "propose_gui_changes") target = "gui";
           else {
             const raw = typeof args.target === "string" ? args.target : "";
-            if (raw === "hybrid" || raw === "informal") {
+            if (raw === "hybrid" || raw === "informal" || raw === "gui") {
               target = raw;
             } else if (permissions.hybrid.write && !permissions.informal.write) {
               target = "hybrid";
@@ -3041,8 +3503,8 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
                 role: "tool",
                 content: JSON.stringify({
                   ok: false,
-                  error: 'propose_source_edit requires target: "informal" or "hybrid".',
-                  next: "Re-call propose_source_edit with an explicit target after read_* view=source."
+                  error: 'propose_source_edit requires target: "informal", "hybrid", or "gui".',
+                  next: 'Re-call propose_source_edit with an explicit target after read_* view=source. For GUI, target is "gui" and each call should touch one screen.'
                 }),
                 timestamp: (/* @__PURE__ */ new Date()).toISOString()
               });
@@ -3148,11 +3610,14 @@ async function runAgentTurn(session, projectRoot, ctx, userText, sink, signal) {
           }
           const validity = validateAgentPatch(target, patch, { mode });
           if (!validity.ok) {
-            session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
-              fingerprint: patchFingerprint(patch),
-              error: validity.message,
-              mode
-            });
+            const emptyPatch = !Array.isArray(patch.operations) || patch.operations.length === 0;
+            if (!emptyPatch) {
+              session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
+                fingerprint: patchFingerprint(patch),
+                error: validity.message,
+                mode
+              });
+            }
             session.messages.push({
               id: call.id,
               role: "tool",
@@ -4825,6 +5290,7 @@ electron.app.whenReady().then(async () => {
   loadStudioEnv();
   console.warn(conditionNotice(getExperimentConfig()));
   registerFileHandlers(getWindow);
+  registerTextSearchHandlers();
   registerWindowHandlers(getWindow);
   registerProjectHandlers(getWindow);
   registerAgentHandlers();

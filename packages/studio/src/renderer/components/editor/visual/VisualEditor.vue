@@ -75,7 +75,9 @@ const editingFunctionName = ref<string | null>(null)
 
 const visual = inject(VISUAL_MODEL_KEY)
 if (!visual) throw new Error('VisualEditor requires VISUAL_MODEL_KEY provider')
-const { state: refinementState } = useRefinementState()
+const { state: refinementState } = useRefinementState(
+  computed(() => !props.hideNavigator && editorUi.sideView === 'refine')
+)
 
 const modules = computed(() => visual.model.value?.modules ?? [])
 const diagnostics = computed(

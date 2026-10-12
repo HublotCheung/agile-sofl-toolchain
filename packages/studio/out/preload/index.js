@@ -65,6 +65,7 @@ const studio = {
   validateSignature: (kind, signature) => electron.ipcRenderer.invoke("studio:validate-signature", kind, signature),
   searchWorkspaceFiles: (rootDir, query) => electron.ipcRenderer.invoke("studio:search-workspace-files", rootDir, query),
   searchWorkspaceSymbols: (rootDir, query) => electron.ipcRenderer.invoke("studio:search-workspace-symbols", rootDir, query),
+  searchProjectText: (payload) => electron.ipcRenderer.invoke("studio:search-project-text", payload),
   openProjectFolder: () => electron.ipcRenderer.invoke("studio:open-project-folder"),
   revealInFolder: (filePath) => electron.ipcRenderer.invoke("studio:reveal-in-folder", filePath),
   buildInformalModel: (source, options) => electron.ipcRenderer.invoke("studio:build-informal-model", source, options),
@@ -77,7 +78,11 @@ const studio = {
   scanProject: (root) => electron.ipcRenderer.invoke("studio:scan-project", root),
   workspaceScan: (root) => electron.ipcRenderer.invoke("studio:workspace-scan", root),
   moduleHashes: (source) => electron.ipcRenderer.invoke("studio:module-hashes", source),
-  modulesFromSource: (payload) => electron.ipcRenderer.invoke("studio:modules-from-source", JSON.parse(JSON.stringify(payload))),
+  modulesFromSource: (payload) => electron.ipcRenderer.invoke("studio:modules-from-source", {
+    source: payload.source,
+    filePath: payload.filePath,
+    guiModule: payload.guiModule
+  }),
   projectList: () => electron.ipcRenderer.invoke("studio:project-list"),
   projectCreate: (name) => electron.ipcRenderer.invoke("studio:project-create", name),
   projectCreateFromTemplate: (name, templateId) => electron.ipcRenderer.invoke("studio:project-create-from-template", name, templateId),
@@ -130,7 +135,10 @@ const studio = {
   patchHybridSpec: (payload) => electron.ipcRenderer.invoke("studio:patch-hybrid-spec", JSON.parse(JSON.stringify(payload))),
   acceptHybridWrite: (payload) => electron.ipcRenderer.invoke("studio:accept-hybrid-write", payload),
   refinementStep: (payload) => electron.ipcRenderer.invoke("studio:refinement-step", JSON.parse(JSON.stringify(payload))),
-  refinementState: (payload) => electron.ipcRenderer.invoke("studio:refinement-state", JSON.parse(JSON.stringify(payload))),
+  refinementState: (payload) => electron.ipcRenderer.invoke("studio:refinement-state", {
+    source: payload.source,
+    projectRoot: payload.projectRoot
+  }),
   gitIsRepo: (rootPath) => electron.ipcRenderer.invoke("studio:git-is-repo", rootPath),
   gitStatus: (rootPath) => electron.ipcRenderer.invoke("studio:git-status", rootPath),
   gitInit: (rootPath) => electron.ipcRenderer.invoke("studio:git-init", rootPath),

@@ -17,24 +17,28 @@ export type WorkspaceSnapshot = {
 }
 
 export function persistWorkspace(activeTabId: string, tabs: EditorTab[]): void {
-  const documentTabs = tabs
-    .filter((t) => t.kind === 'document')
-    .map((t) => ({
-      id: t.id,
-      filePath: t.filePath,
-      uri: t.uri,
-      title: t.title,
-      isDirty: t.isDirty,
-      content: t.content,
-      documentKind: t.documentKind,
-      linkedDocumentId: t.linkedDocumentId
-    }))
-  if (!documentTabs.length) {
-    sessionStorage.removeItem(SESSION_KEY)
-    return
+  try {
+    const documentTabs = tabs
+      .filter((t) => t.kind === 'document')
+      .map((t) => ({
+        id: t.id,
+        filePath: t.filePath,
+        uri: t.uri,
+        title: t.title,
+        isDirty: t.isDirty,
+        content: t.content,
+        documentKind: t.documentKind,
+        linkedDocumentId: t.linkedDocumentId
+      }))
+    if (!documentTabs.length) {
+      sessionStorage.removeItem(SESSION_KEY)
+      return
+    }
+    const snapshot: WorkspaceSnapshot = { activeTabId, documentTabs }
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(snapshot))
+  } catch (err) {
+    console.warn('[studio] workspace session persist failed', err)
   }
-  const snapshot: WorkspaceSnapshot = { activeTabId, documentTabs }
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(snapshot))
 }
 
 export function restoreWorkspace(): { tabs: EditorTab[]; activeTabId: string } | null {
