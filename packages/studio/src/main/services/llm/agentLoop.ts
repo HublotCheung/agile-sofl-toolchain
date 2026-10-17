@@ -287,8 +287,9 @@ Agile-SOFL conventions:
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.
 
 Stakeholder decisions (product rule):
-- If a threshold, permission/role scope, policy boundary, capacity limit, or other stakeholder choice is unresolved in the task text, call ask_clarification BEFORE writing that concrete value into Informal or Hybrid.
-- Until the user answers, do not invent defaults for those parameters and do not treat silence as approval of a specific number, role, or scope.
+- If a threshold, permission/role scope, policy boundary, capacity limit, open course-assignment/export scope, undecided allow/deny rule, or other stakeholder choice is unresolved in the task text, call ask_clarification BEFORE writing that concrete value into Informal or Hybrid.
+- Open policy/scope slots (e.g. "according to the course assignment policy" without defining who may export) require ask_clarification before propose_hybrid_changes / replace-process-body commits any concrete allow/deny default. Do not silently hard-code mappings such as assigned=true allows / assigned=false denies unless the user confirmed them.
+- Until the user answers, do not invent defaults for those parameters and do not treat silence as approval of a specific number, role, scope, or allow/deny mapping.
 - After an answer arrives, apply only what was confirmed; ask again if another distinct stakeholder choice remains open.
 
 Never claim you already modified the file. Writes go through propose_* tools. User Apply/Reject (or auto-write) is only a tool result — you MUST continue the same task.
