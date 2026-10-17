@@ -24,6 +24,8 @@ export const PILOT_TEMPERATURE = 0.35 // fixed inside agentLoop.ts; recorded her
 export interface RunOptions {
   condition: 'T' | 'B2'
   informalPath: string
+  /** Existing specification for maintenance tasks; omitted for construction. */
+  initialHybridAsfl?: string
   outDir: string
   skillId?: string
   userText?: string
@@ -66,7 +68,7 @@ export const DEFAULT_USER_TEXT =
 export const DEFAULT_CLARIFICATION = 'Rebuild from scratch. Use your best judgement and continue without further questions.'
 
 /** Hash of everything that must be identical across conditions (input, skill prompt, user text, answers, temperature). */
-export function promptHash(o: { informal: string; skillPrompt: string; userText: string; clarification: string }): string {
+export function promptHash(o: { informal: string; skillPrompt: string; userText: string; clarification: string; initialHybridSha256?: string }): string {
   return createHash('sha256')
     .update(JSON.stringify({ ...o, temperature: PILOT_TEMPERATURE }))
     .digest('hex')
@@ -97,13 +99,20 @@ export async function runOnce(o: RunOptions): Promise<RunResult> {
   const skillId = o.skillId ?? 'hybrid-generation'
   const userText = o.userText ?? DEFAULT_USER_TEXT
   const clarification = o.clarificationAnswer ?? DEFAULT_CLARIFICATION
-  const hash = promptHash({ informal, skillPrompt: skillById(skillId).prompt, userText, clarification })
+  const hash = promptHash({
+    informal,
+    skillPrompt: skillById(skillId).prompt,
+    userText,
+    clarification,
+    ...(o.initialHybridAsfl !== undefined ? { initialHybridSha256: createHash('sha256').update(o.initialHybridAsfl).digest('hex') } : {})
+  })
   const maxApprovals = o.maxApprovals ?? 3
 
   const ctx: AgentTurnContext = {
     projectName: 'pilot', projectRoot: runDir, moduleId: 'project',
-    informalMarkdown: informal, hybridAsfl: '', skillId, permissions: generationAgentPermissions()
+    informalMarkdown: informal, hybridAsfl: o.initialHybridAsfl ?? '', skillId, permissions: generationAgentPermissions()
   }
+  if (o.initialHybridAsfl !== undefined) writeFileSync(join(runDir, 'hybrid.asfl'), o.initialHybridAsfl)
   const now = new Date().toISOString()
   let session: AgentSession = { id: newId('sess'), moduleId: 'project', title: 'Requirement Analysis', createdAt: now, updatedAt: now, messages: [], context: {} }
   session = await runAgentTurn(session, runDir, ctx, userText)

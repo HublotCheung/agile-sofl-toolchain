@@ -22,6 +22,24 @@ const toolCall = (name: string, args: unknown) => sse([
 afterEach(() => vi.unstubAllGlobals())
 
 describe('headless agent harness', () => {
+  it('preserves and supplies an existing specification for a maintenance task', async () => {
+    process.env.ECNU_API_KEY = 'sk-testtesttesttest'
+    const source = 'module SYSTEM_Existing;\nprocess Keep (x: nat) y: nat\nFSF : others && y = x\nend_process\nend_module'
+    const fetchMock = vi.fn(async () => sse([
+      { model: 'mock-model', choices: [{ delta: { content: 'No change needed.' }, finish_reason: 'stop' }] }
+    ]))
+    vi.stubGlobal('fetch', fetchMock)
+    const inf = join(mkdtempSync(join(tmpdir(), 'maintenance-inf-')), 'x.aspec')
+    writeFileSync(inf, '# Functions\n\n## Keep\n\nPreserve the existing process.\n')
+    const out = mkdtempSync(join(tmpdir(), 'maintenance-out-'))
+    const r = await runOnce({ condition: 'T', informalPath: inf, initialHybridAsfl: source,
+      outDir: out, userText: 'Inspect the existing Keep process without modifying it.' })
+    expect(readFileSync(join(r.runDir, 'hybrid.asfl'), 'utf8')).toBe(source)
+    expect(r.approvals).toBe(0)
+    // Inventory identifiers omit the SYSTEM_ syntax prefix.
+    expect(JSON.stringify(fetchMock.mock.calls)).toContain('proc:Existing.Keep')
+  }, 60000)
+
   it('promptHash is identical for identical inputs and changes with the prompt', () => {
     const base = { informal: 'x', skillPrompt: 'p', userText: 'u', clarification: 'c' }
     expect(promptHash(base)).toBe(promptHash({ ...base }))
