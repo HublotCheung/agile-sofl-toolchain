@@ -120,14 +120,40 @@ function truncatedWholeDocument(value: Record<string, unknown>): boolean {
   return kind === 'replace-document' || kind === 'replace-html'
 }
 
+/** True when the provider stopped because the completion hit max_tokens / length. */
+export function isLengthFinishReason(finishReason: string | undefined | null): boolean {
+  if (!finishReason) return false
+  const normalized = finishReason.trim().toLowerCase()
+  return normalized === 'length' || normalized === 'max_tokens'
+}
+
+export type ParseToolArgsOptions = {
+  /** When the stream ended due to length/max_tokens, refuse repair and hard-fail. */
+  finishReason?: string
+}
+
 /**
  * Parse model tool-call arguments.
  * Accepts trailing junk after a complete JSON value, and a payload cut off
  * mid-string (typical when a long GUI patch hits the output limit).
+ *
+ * When finishReason is length/max_tokens, never silently repair truncated JSON
+ * into a successful tool call -- return a clear error instead.
  */
-export function parseToolArguments(raw: string): ParsedToolArgs {
+export function parseToolArguments(raw: string, options?: ParseToolArgsOptions): ParsedToolArgs {
   const trimmed = raw.trim()
   if (!trimmed) return { ok: false, error: 'Tool arguments were empty.' }
+  if (isLengthFinishReason(options?.finishReason)) {
+    return {
+      ok: false,
+      error:
+        'Model output was truncated (finish_reason=' +
+        String(options?.finishReason) +
+        ', ' +
+        String(trimmed.length) +
+        ' characters). Do not treat partial tool JSON as success. Split into smaller tool calls or increase max_tokens.'
+    }
+  }
   const direct = tryParse(trimmed)
   if (direct) {
     inflateOperations(direct)

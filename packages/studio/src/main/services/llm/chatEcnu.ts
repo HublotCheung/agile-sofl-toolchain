@@ -147,13 +147,31 @@ export function reasoningEffortFor(thinking?: boolean): 'low' | 'off' {
   return thinking === false ? 'off' : 'low'
 }
 
-/** Request body of a streaming chat call (pure; exported for tests). */
-export function buildStreamBody(options: { messages: ChatMessage[]; tools?: ChatTool[]; temperature?: number; thinking?: boolean }): Record<string, unknown> {
+/** Default completion budget for agent streaming calls (GUI/tool JSON can be large). Override with options.maxTokens or ECNU_MAX_TOKENS. */
+export const DEFAULT_STREAM_MAX_TOKENS = 8192
+
+/** Resolve max_tokens for a streaming request. Explicit option wins, then ECNU_MAX_TOKENS, else DEFAULT_STREAM_MAX_TOKENS. */
+export function resolveStreamMaxTokens(explicit?: number): number {
+  if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit > 0) return Math.floor(explicit)
+  const fromEnv = Number(process.env.ECNU_MAX_TOKENS)
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return Math.floor(fromEnv)
+  return DEFAULT_STREAM_MAX_TOKENS
+}
+
+/** Request body of a streaming chat call (pure; exported for tests). Always sets max_tokens so length truncations are explicit and detectable. */
+export function buildStreamBody(options: {
+  messages: ChatMessage[]
+  tools?: ChatTool[]
+  temperature?: number
+  thinking?: boolean
+  maxTokens?: number
+}): Record<string, unknown> {
   const body: Record<string, unknown> = {
     messages: options.messages,
     temperature: options.temperature ?? 0.35,
     stream: true,
-    thinking: { type: options.thinking === false ? 'disabled' : 'enabled' }
+    thinking: { type: options.thinking === false ? 'disabled' : 'enabled' },
+    max_tokens: resolveStreamMaxTokens(options.maxTokens)
   }
   const effort = reasoningEffortFor(options.thinking)
   if (effort !== 'off') body.reasoning_effort = effort
@@ -169,6 +187,7 @@ export async function chatEcnuStream(options: {
   tools?: ChatTool[]
   temperature?: number
   thinking?: boolean
+  maxTokens?: number
   signal?: AbortSignal
   onDelta?: (delta: ChatStreamDelta) => void
 }): Promise<ChatCompletion> {

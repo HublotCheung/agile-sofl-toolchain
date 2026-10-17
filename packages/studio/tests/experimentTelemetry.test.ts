@@ -133,4 +133,31 @@ describe('freeze v1.2: reasoning off', () => {
     const on = buildStreamBody({ messages: [{ role: 'user', content: 'x' }], thinking: true })
     expect(on).toMatchObject({ thinking: { type: 'enabled' }, reasoning_effort: 'low', stream: true, temperature: 0.35 })
   })
+
+  it('stream request body always sets max_tokens (default or explicit)', async () => {
+    const prev = process.env.ECNU_MAX_TOKENS
+    delete process.env.ECNU_MAX_TOKENS
+    try {
+      const { buildStreamBody, DEFAULT_STREAM_MAX_TOKENS, resolveStreamMaxTokens } = await import(
+        '../src/main/services/llm/chatEcnu'
+      )
+      expect(resolveStreamMaxTokens()).toBe(DEFAULT_STREAM_MAX_TOKENS)
+      const body = buildStreamBody({ messages: [{ role: 'user', content: 'x' }], thinking: false })
+      expect(body.max_tokens).toBe(DEFAULT_STREAM_MAX_TOKENS)
+      expect(body.max_tokens).toBe(8192)
+      const custom = buildStreamBody({
+        messages: [{ role: 'user', content: 'x' }],
+        thinking: false,
+        maxTokens: 2048
+      })
+      expect(custom.max_tokens).toBe(2048)
+      process.env.ECNU_MAX_TOKENS = '4096'
+      expect(resolveStreamMaxTokens()).toBe(4096)
+      const fromEnv = buildStreamBody({ messages: [{ role: 'user', content: 'x' }], thinking: false })
+      expect(fromEnv.max_tokens).toBe(4096)
+    } finally {
+      if (prev === undefined) delete process.env.ECNU_MAX_TOKENS
+      else process.env.ECNU_MAX_TOKENS = prev
+    }
+  })
 })
