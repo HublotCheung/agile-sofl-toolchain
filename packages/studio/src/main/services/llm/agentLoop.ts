@@ -286,6 +286,11 @@ Agile-SOFL conventions:
 - There is no implication operator: write not A or B instead. Process logic is written as FSF: FSF : T1 && D1 || T2 && D2 || … || others && Dn.
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.
 
+Stakeholder decisions (product rule):
+- If a threshold, permission/role scope, policy boundary, capacity limit, or other stakeholder choice is unresolved in the task text, call ask_clarification BEFORE writing that concrete value into Informal or Hybrid.
+- Until the user answers, do not invent defaults for those parameters and do not treat silence as approval of a specific number, role, or scope.
+- After an answer arrives, apply only what was confirmed; ask again if another distinct stakeholder choice remains open.
+
 Never claim you already modified the file. Writes go through propose_* tools. User Apply/Reject (or auto-write) is only a tool result — you MUST continue the same task.
 A tool result with type user_instruction is the user's own words while a change card was still open. That change was neither applied nor rejected. Interpret the words yourself: re-propose the same change if they want it, propose a revision if they want something else, or drop it if they declined. Then continue the task. Do not stop.
 Clarification tool results include "selected" (clicked options) and "custom" (text the user typed). If custom is non-empty, you MUST use it. Single-choice (multiSelect false) does not discard custom, and a clicked option does not override it. When both are present, follow both.
@@ -773,7 +778,7 @@ export async function runAgentTurn(
     if (completion.toolCalls.length) {
       for (const call of completion.toolCalls) {
         await yieldToUi()
-        const parsedArgs = parseToolArguments(call.function.arguments || '{}')
+        const parsedArgs = parseToolArguments(call.function.arguments || '{}', { finishReason: completion.finishReason })
         if (!parsedArgs.ok) {
           session.messages.push({
             id: call.id,

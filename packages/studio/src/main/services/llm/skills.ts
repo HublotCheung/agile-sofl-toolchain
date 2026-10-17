@@ -19,7 +19,7 @@ export const AGENT_SKILLS: Array<{ id: AgentSkillId; name: string; prompt: strin
     id: 'requirement-clarification',
     name: 'Requirement Clarification',
     prompt:
-      'Find vague, missing, or ambiguous information. Ask focused questions (options + optional custom input). Do not invent details the user did not confirm.'
+      'Find vague, missing, or ambiguous information. Ask focused questions (options + optional custom input) via ask_clarification. When a stakeholder choice is unresolved (threshold, permission/role scope, policy boundary, capacity limit), ask before writing that concrete value into the specification. Do not invent details the user did not confirm.'
   },
   {
     id: 'function-decomposition',
@@ -53,6 +53,10 @@ Agile-SOFL architecture:
 - Exactly one top-level SYSTEM_ module named after the whole system (e.g. SYSTEM_FoodDelivery). It is the system module; other modules are children (module Auth / FoodDelivery;).
 - Add SYSTEM_ first (it is inserted at the file start). Then add semantic modules with parentId=mod:SYSTEM_…. A GUI_ module is a child, not the system module.
 - Process signatures default to () when ports are unknown. Never invent dummy (x: nat) ok: nat. Write real inputs/outputs when they exist. There is no implication operator; write not A or B.
+Stakeholder decisions:
+- If a threshold, permission/role scope, policy boundary, capacity limit, or other stakeholder choice is unresolved in the task, call ask_clarification before writing that concrete value into Informal or Hybrid.
+- Until answered, do not invent defaults for those parameters and do not treat silence as approval of a specific number, role, or scope.
+- After an answer, apply only what was confirmed; ask again if another distinct stakeholder choice remains open.
 Pipeline — keep going after each applied patch until every enabled stage is done, then summarize:
 1. Read Informal and Hybrid inventories. If Hybrid already exists and strategy is ask, call ask_clarification (merge vs rebuild).
 2. Module architecture: add the SYSTEM_ module, then each semantic module (and a GUI module) with propose_hybrid_changes op=add kind=module. Do not paste module source.
@@ -73,6 +77,7 @@ Infer unstated GUI/navigation only when the parameter allows it; otherwise ask. 
     prompt: `You are refining an existing Hybrid (.asfl) specification along three lines: process atomicity, data refinement, and operational grain. Do not dump a full file. Formal pre/post does not make a process one operation.
 Completeness is not "whatever happens to be written". A module that is only a name (no types/vars/processes/cdfd) is an empty shell — a gap. A process that is only a name (no pre/post/fsf/decom) is a stub — also a gap.
 Guide the user one slice at a time. Do not silently refine every node.
+If a stakeholder choice (threshold, permission/role scope, policy boundary, capacity) is unresolved, ask_clarification before writing that concrete value into the Hybrid.
 Pipeline:
 1. read_refinement_state (tree or summary) plus Informal/Hybrid inventories. Identify the named module/process/data item from the user message, or ask_clarification if several slices are open.
 2. Prefer propose_refinement_step: FormalizePredicate, DecomposeProcess, SetCdfd, DeclareAtomic, IntroduceRetrieve, DischargeDataObligation, DefineType, ClassifyGrain, ResolveVariation.
@@ -95,7 +100,7 @@ export const AGENT_TOOLS = [
     function: {
       name: 'ask_clarification',
       description:
-        'Ask the user a structured clarification question. The UI renders options plus a custom text field. The tool result has selected (clicked options) and custom (text the user typed). A non-empty custom answer is required context for both single-choice and multi-choice, even when selected is also set. Never ignore custom. Use this instead of listing questions only in prose when a decision is needed.',
+        'Ask the user a structured clarification question when a stakeholder decision is needed (threshold, permission/role scope, policy boundary, capacity, merge vs rebuild, next refinement slice). The UI renders options plus a custom text field. The tool result has selected (clicked options) and custom (text the user typed). A non-empty custom answer is required context for both single-choice and multi-choice, even when selected is also set. Never ignore custom. Do not invent those concrete values in the specification before this tool returns. Use this instead of listing questions only in prose when a decision is needed.',
       parameters: {
         type: 'object',
         properties: {

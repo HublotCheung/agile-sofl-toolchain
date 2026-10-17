@@ -7,7 +7,7 @@ const userData = mkdtempSync(join(tmpdir(), 'harness-ud-'))
 writeFileSync(join(userData, 'llm-profiles.json'), JSON.stringify({ activeId: null, profiles: [] }))
 vi.mock('electron', () => ({ app: { getPath: () => userData, getAppPath: () => userData }, ipcMain: { handle: () => undefined } }))
 
-import { promptHash, runOnce } from '../scripts/agent-harness/core'
+import { promptHash, runOnce, UNMATCHED_CLARIFICATION_REPLY } from '../scripts/agent-harness/core'
 
 function sse(chunks: unknown[]): Response {
   const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n'
@@ -67,5 +67,59 @@ describe('headless agent harness', () => {
     expect(pw.diagnostics.l2.enabled).toBe(condition === 'T')
     expect(readFileSync(join(r.runDir, 'hybrid.asfl'), 'utf-8')).toContain('SYSTEM_X')
     expect(JSON.stringify(lines)).not.toContain('sk-testtesttesttest')
+  }, 60000)
+
+  it('resolveClarification maps ask_clarification and emits study events (no best-judgement default)', async () => {
+    process.env.ECNU_API_KEY = 'sk-testtesttesttest'
+    const replies = [
+      toolCall('ask_clarification', {
+        question: 'Who may export grades?',
+        options: [{ id: 'teacher', label: 'Teachers only' }, { id: 'admin', label: 'Admins only' }],
+        multiSelect: false,
+        allowCustom: true
+      }),
+      sse([{ model: 'mock-model', choices: [{ delta: { content: 'Noted teacher scope.' }, finish_reason: 'stop' }] }])
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => replies.shift() ?? replies[0]))
+    const inf = join(mkdtempSync(join(tmpdir(), 'clar-inf-')), 'x.aspec')
+    writeFileSync(inf, '# Functions\n\n## Export\n\nExport grades.\n')
+    const out = mkdtempSync(join(tmpdir(), 'clar-out-'))
+    const events: Array<Record<string, unknown>> = []
+    const resolveClarification = vi.fn(async (ask: { question: string }) => {
+      expect(ask.question).toMatch(/export/i)
+      return { text: 'Teachers only may export grades.', matchedSlotIds: ['export-scope'], unmatched: false }
+    })
+    const r = await runOnce({
+      condition: 'T',
+      informalPath: inf,
+      outDir: out,
+      maxApprovals: 2,
+      userText: 'Implement export permission. Ask when the role scope is unspecified.',
+      resolveClarification,
+      onStudyEvent: (e) => events.push(e)
+    })
+    expect(resolveClarification).toHaveBeenCalled()
+    expect(events.some((e) => e.type === 'clarification_asked')).toBe(true)
+    expect(events.some((e) => e.type === 'oracle_reply' && e.matched === true)).toBe(true)
+    expect(JSON.stringify(events)).not.toMatch(/best judgement/i)
+    expect(UNMATCHED_CLARIFICATION_REPLY).not.toMatch(/best judgement/i)
+    expect(r.stopReason).toBeTruthy()
+  }, 60000)
+
+  it('without resolveClarification uses unmatched reply instead of best judgement', async () => {
+    process.env.ECNU_API_KEY = 'sk-testtesttesttest'
+    const replies = [
+      toolCall('ask_clarification', { question: 'What login failure threshold?', options: [{ id: 'a', label: '3' }], multiSelect: false }),
+      sse([{ model: 'mock-model', choices: [{ delta: { content: 'Stopped without inventing.' }, finish_reason: 'stop' }] }])
+    ]
+    const fetchMock = vi.fn(async () => replies.shift() ?? replies[0])
+    vi.stubGlobal('fetch', fetchMock)
+    const inf = join(mkdtempSync(join(tmpdir(), 'unm-inf-')), 'x.aspec')
+    writeFileSync(inf, '# Functions\n\n## Login\n\nLogin.\n')
+    const out = mkdtempSync(join(tmpdir(), 'unm-out-'))
+    await runOnce({ condition: 'T', informalPath: inf, outDir: out, maxApprovals: 2, userText: 'Implement login threshold.' })
+    const bodies = fetchMock.mock.calls.map((c) => String(c[1]?.body ?? ''))
+    expect(JSON.stringify(bodies)).toContain('Do not invent concrete business defaults')
+    expect(JSON.stringify(bodies)).not.toMatch(/best judgement/i)
   }, 60000)
 })

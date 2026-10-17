@@ -21,6 +21,19 @@ import { readInformal } from './informal'
 
 export const PILOT_TEMPERATURE = 0.35 // fixed inside agentLoop.ts; recorded here for the manifest
 
+export type ClarificationAsk = {
+  question: string
+  options?: Array<{ id: string; label: string }>
+  multiSelect?: boolean
+  allowCustom?: boolean
+}
+
+export type ClarificationResolution = {
+  text: string
+  matchedSlotIds?: string[]
+  unmatched?: boolean
+}
+
 export interface RunOptions {
   condition: 'T' | 'B2'
   informalPath: string
@@ -32,6 +45,13 @@ export interface RunOptions {
   /** max auto-approved proposals before the turn is stopped (bounds LLM calls) */
   maxApprovals?: number
   clarificationAnswer?: string
+  /**
+   * Clarification experiments: map ask_clarification to a stakeholder/oracle answer.
+   * When set, the harness never falls back to DEFAULT_CLARIFICATION (best-judgement).
+   */
+  resolveClarification?: (ask: ClarificationAsk) => ClarificationResolution | Promise<ClarificationResolution>
+  /** Study/pilot telemetry (e.g. clarification_asked, oracle_reply). */
+  onStudyEvent?: (event: Record<string, unknown>) => void
   participantId?: string
   /** externally assigned (blinded) run id; random when omitted */
   runId?: string
@@ -65,7 +85,11 @@ export interface RunResult {
 
 export const DEFAULT_USER_TEXT =
   'Generate the Hybrid Specification from the Informal Specification. Strategy: rebuild (no existing Hybrid). Work incrementally with the tools.'
-export const DEFAULT_CLARIFICATION = 'Rebuild from scratch. Use your best judgement and continue without further questions.'
+/** Must NOT authorize inventing business rules when no oracle/answer is supplied. */
+export const UNMATCHED_CLARIFICATION_REPLY =
+  'No additional stakeholder decision is available from this automated reply. Do not invent concrete business defaults, thresholds, role scopes, permission policies, or capacity limits. If a stakeholder choice is still required, call ask_clarification again; otherwise continue only with requirements already stated in the task.'
+/** @deprecated Prefer resolveClarification / UNMATCHED_CLARIFICATION_REPLY. */
+export const DEFAULT_CLARIFICATION = UNMATCHED_CLARIFICATION_REPLY
 
 /** Hash of everything that must be identical across conditions (input, skill prompt, user text, answers, temperature). */
 export function promptHash(o: { informal: string; skillPrompt: string; userText: string; clarification: string; initialHybridSha256?: string }): string {
@@ -98,12 +122,14 @@ export async function runOnce(o: RunOptions): Promise<RunResult> {
   const { text: informal, sha256: informalSha256 } = readInformal(o.informalPath)
   const skillId = o.skillId ?? 'hybrid-generation'
   const userText = o.userText ?? DEFAULT_USER_TEXT
-  const clarification = o.clarificationAnswer ?? DEFAULT_CLARIFICATION
+  const clarificationForHash =
+    o.clarificationAnswer ??
+    (o.resolveClarification ? 'dynamic-oracle' : UNMATCHED_CLARIFICATION_REPLY)
   const hash = promptHash({
     informal,
     skillPrompt: skillById(skillId).prompt,
     userText,
-    clarification,
+    clarification: clarificationForHash,
     ...(o.initialHybridAsfl !== undefined ? { initialHybridSha256: createHash('sha256').update(o.initialHybridAsfl).digest('hex') } : {})
   })
   const maxApprovals = o.maxApprovals ?? 3
@@ -125,7 +151,37 @@ export async function runOnce(o: RunOptions): Promise<RunResult> {
     if (!pending || !toolId) break
     const last = approvals + 1 >= maxApprovals
     if (pending.clarification) {
-      session = await resumeWithToolResult(session, runDir, ctx, toolId, clarification, undefined, !last)
+      const ask: ClarificationAsk = {
+        question: String(pending.clarification.question || 'Please clarify.'),
+        options: pending.clarification.options,
+        multiSelect: pending.clarification.multiSelect,
+        allowCustom: pending.clarification.allowCustom
+      }
+      o.onStudyEvent?.({
+        type: 'clarification_asked',
+        question: ask.question,
+        options: ask.options?.map((x) => x.label),
+        multiSelect: ask.multiSelect
+      })
+      let answerText: string
+      if (o.resolveClarification) {
+        const resolved = await o.resolveClarification(ask)
+        const reply = String(resolved?.text ?? '').trim()
+        o.onStudyEvent?.({
+          type: 'oracle_reply',
+          question: ask.question,
+          matched: !resolved?.unmatched && (resolved?.matchedSlotIds?.length ?? 0) > 0,
+          unmatched: !!resolved?.unmatched || !reply,
+          matchedSlotIds: resolved?.matchedSlotIds ?? [],
+          answerPreview: reply.slice(0, 240)
+        })
+        answerText = reply || UNMATCHED_CLARIFICATION_REPLY
+      } else if (o.clarificationAnswer !== undefined) {
+        answerText = o.clarificationAnswer
+      } else {
+        answerText = UNMATCHED_CLARIFICATION_REPLY
+      }
+      session = await resumeWithToolResult(session, runDir, ctx, toolId, answerText, undefined, !last)
       if (last) { stopReason = 'call budget reached'; break }
       continue
     }
