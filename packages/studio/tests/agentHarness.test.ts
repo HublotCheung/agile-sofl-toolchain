@@ -1,5 +1,5 @@
 ﻿import { describe, it, expect, vi, afterEach } from 'vitest'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -124,7 +124,7 @@ describe('headless agent harness', () => {
     expect(events.some((e) => e.type === 'oracle_reply' && e.matched === true)).toBe(true)
     expect(JSON.stringify(events)).not.toMatch(/best judgement/i)
     expect(UNMATCHED_CLARIFICATION_REPLY).not.toMatch(/best judgement/i)
-    expect(r.stopReason).toBeTruthy()
+    expect(r.stopReason).toBe('clarify_without_write')
   }, 60000)
 
   it('without resolveClarification uses unmatched reply instead of best judgement', async () => {
@@ -142,5 +142,110 @@ describe('headless agent harness', () => {
     const bodies = fetchMock.mock.calls.map((c) => String(c[1]?.body ?? ''))
     expect(JSON.stringify(bodies)).toContain('Do not invent concrete business defaults')
     expect(JSON.stringify(bodies)).not.toMatch(/best judgement/i)
+  }, 60000)
+
+  it('labels clarify-then-no-propose as clarify_without_write (not agent finished)', async () => {
+    process.env.ECNU_API_KEY = 'sk-testtesttesttest'
+    const replies = [
+      toolCall('ask_clarification', {
+        question: 'Who may export grades?',
+        options: [{ id: 'teacher', label: 'Teachers only' }],
+        multiSelect: false
+      }),
+      sse([{ model: 'mock-model', choices: [{ delta: { content: 'Noted.' }, finish_reason: 'stop' }] }])
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => replies.shift() ?? replies[0]))
+    const inf = join(mkdtempSync(join(tmpdir(), 'cww-inf-')), 'x.aspec')
+    writeFileSync(inf, '# Functions\n\n## Export\n\nExport grades.\n')
+    const out = mkdtempSync(join(tmpdir(), 'cww-out-'))
+    const r = await runOnce({
+      condition: 'T', informalPath: inf, outDir: out, maxApprovals: 2,
+      userText: 'Implement export permission. Ask when role scope is unspecified.',
+      resolveClarification: async () => ({ text: 'Teachers only.', matchedSlotIds: ['export-scope'], unmatched: false })
+    })
+    expect(r.approvals).toBe(0)
+    expect(r.stopReason).toBe('clarify_without_write')
+    const manifest = JSON.parse(readFileSync(join(r.runDir, 'manifest.json'), 'utf8'))
+    expect(manifest.stopReason).toBe('clarify_without_write')
+    expect(manifest.clarificationsAnswered).toBe(1)
+  }, 60000)
+
+  it('breaks post-clarify consecutive spec-read spin with fair budget (no force-propose)', async () => {
+    process.env.ECNU_API_KEY = 'sk-testtesttesttest'
+    const replies = [
+      toolCall('ask_clarification', { question: 'Threshold?', options: [{ id: 'a', label: '3' }], multiSelect: false }),
+      // After answer: 4 consecutive read_hybrid (cap=3) → 4th denied, turn ends; no propose nudge
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      sse([{ model: 'mock-model', choices: [{ delta: { content: 'should not reach' }, finish_reason: 'stop' }] }])
+    ]
+    const fetchMock = vi.fn(async () => replies.shift() ?? replies[replies.length - 1])
+    vi.stubGlobal('fetch', fetchMock)
+    const inf = join(mkdtempSync(join(tmpdir(), 'spin-inf-')), 'x.aspec')
+    writeFileSync(inf, '# Functions\n\n## Login\n\nLogin.\n')
+    const out = mkdtempSync(join(tmpdir(), 'spin-out-'))
+    const r = await runOnce({
+      condition: 'T', informalPath: inf, outDir: out, maxApprovals: 3,
+      userText: 'Implement login. Clarify threshold then continue.',
+      resolveClarification: async () => ({ text: 'Use 3.', matchedSlotIds: ['login-threshold'], unmatched: false })
+    })
+    expect(r.approvals).toBe(0)
+    expect(r.stopReason).toBe('clarify_without_write')
+    // ask + 3 allowed reads + 4th denied ends turn — no further completion / no force-propose nudge
+    expect(fetchMock.mock.calls.length).toBe(5)
+    const sessDir = join(r.runDir, '.agile-sofl', 'agent', 'sessions')
+    const sessFile = readdirSync(sessDir).find((f) => f.startsWith('sess-') && f.endsWith('.json'))
+    expect(sessFile).toBeTruthy()
+    const session = JSON.parse(readFileSync(join(sessDir, sessFile!), 'utf8'))
+    const toolBodies = session.messages.filter((m: { role: string }) => m.role === 'tool').map((m: { content: string }) => m.content)
+    expect(JSON.stringify(toolBodies)).toContain('post_clarify_read_budget_exhausted')
+    const bodies = fetchMock.mock.calls.map((c) => String(c[1]?.body ?? ''))
+    expect(JSON.stringify(bodies)).not.toMatch(/you must propose|force propose|nudge.*propose/i)
+  }, 60000)
+
+  it('does not cap pre-clarify multi-module spec reads', async () => {
+    process.env.ECNU_API_KEY = 'sk-testtesttesttest'
+    const replies = [
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      toolCall('read_hybrid_specification', { view: 'inventory' }),
+      sse([{ model: 'mock-model', choices: [{ delta: { content: 'Inspected five times.' }, finish_reason: 'stop' }] }])
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => replies.shift() ?? replies[0]))
+    const inf = join(mkdtempSync(join(tmpdir(), 'preread-inf-')), 'x.aspec')
+    writeFileSync(inf, '# Functions\n\n## Keep\n\nPreserve.\n')
+    const out = mkdtempSync(join(tmpdir(), 'preread-out-'))
+    const source = 'module SYSTEM_Existing;\nprocess Keep (x: nat) y: nat\nFSF : others && y = x\nend_process\nend_module'
+    const r = await runOnce({
+      condition: 'T', informalPath: inf, outDir: out, maxApprovals: 1,
+      initialHybridAsfl: source,
+      userText: 'Inspect the existing Keep process without modifying it.'
+    })
+    expect(r.approvals).toBe(0)
+    expect(r.stopReason).toBe('agent finished')
+  }, 60000)
+
+  it('clarify then propose is not labeled clarify_without_write', async () => {
+    process.env.ECNU_API_KEY = 'sk-testtesttesttest'
+    const replies = [
+      toolCall('ask_clarification', { question: 'Who exports?', options: [{ id: 't', label: 'Teachers' }], multiSelect: false }),
+      toolCall('propose_hybrid_changes', { explanation: 'add module', operations: [{ op: 'add', kind: 'module', name: 'SYSTEM_X' }] }),
+      sse([{ model: 'mock-model', choices: [{ delta: { content: 'done' }, finish_reason: 'stop' }] }])
+    ]
+    vi.stubGlobal('fetch', vi.fn(async () => replies.shift() ?? replies[0]))
+    const inf = join(mkdtempSync(join(tmpdir(), 'cprop-inf-')), 'x.aspec')
+    writeFileSync(inf, '# Functions\n\n## Export\n\nExport.\n')
+    const out = mkdtempSync(join(tmpdir(), 'cprop-out-'))
+    const r = await runOnce({
+      condition: 'T', informalPath: inf, outDir: out, maxApprovals: 2,
+      userText: 'Clarify then write.',
+      resolveClarification: async () => ({ text: 'Teachers.', matchedSlotIds: ['export-scope'], unmatched: false })
+    })
+    expect(r.approvals).toBeGreaterThanOrEqual(1)
+    expect(r.stopReason).not.toBe('clarify_without_write')
   }, 60000)
 })

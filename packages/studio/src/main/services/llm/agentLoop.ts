@@ -35,6 +35,62 @@ import { parseToolArguments } from './parseToolArgs'
 
 const MAX_HISTORY = 20
 
+/** Fair post-clarify read budget: after answered clarification(s) and still no propose_*,
+ *  cap consecutive specification reads. Does not nudge or force propose. Pre-clarify uncapped. */
+export const MAX_POST_CLARIFY_CONSECUTIVE_SPEC_READS = 3
+const SPEC_READ_TOOL_NAMES = new Set([
+  'read_hybrid_specification',
+  'read_specification',
+  'read_refinement_state'
+])
+
+function postClarifyReadBudget(session: AgentSession) {
+  if (!session.context.postClarifyReadBudget) {
+    session.context.postClarifyReadBudget = {
+      answeredClarifications: 0,
+      proposalsEmitted: 0,
+      consecutiveSpecReads: 0
+    }
+  }
+  return session.context.postClarifyReadBudget
+}
+
+function noteAnsweredClarification(session: AgentSession): void {
+  const b = postClarifyReadBudget(session)
+  b.answeredClarifications += 1
+  b.consecutiveSpecReads = 0
+}
+
+function noteProposalEmitted(session: AgentSession): void {
+  const b = postClarifyReadBudget(session)
+  b.proposalsEmitted += 1
+  b.consecutiveSpecReads = 0
+}
+
+/** Denial payload when this spec-read exceeds the fair post-clarify budget; otherwise null. */
+function takePostClarifySpecReadDenial(
+  session: AgentSession,
+  toolName: string
+): { ok: false; error: string; consecutiveSpecReads: number; maxConsecutiveSpecReads: number; next: string } | null {
+  if (!SPEC_READ_TOOL_NAMES.has(toolName)) return null
+  const b = postClarifyReadBudget(session)
+  if (b.answeredClarifications <= 0 || b.proposalsEmitted > 0) {
+    b.consecutiveSpecReads = 0
+    return null
+  }
+  b.consecutiveSpecReads += 1
+  if (b.consecutiveSpecReads <= MAX_POST_CLARIFY_CONSECUTIVE_SPEC_READS) return null
+  return {
+    ok: false,
+    error: 'post_clarify_read_budget_exhausted',
+    consecutiveSpecReads: b.consecutiveSpecReads,
+    maxConsecutiveSpecReads: MAX_POST_CLARIFY_CONSECUTIVE_SPEC_READS,
+    next:
+      'Fair call budget ended this turn after consecutive specification reads following clarification without a propose_* write. No further tool calls in this turn.'
+  }
+}
+
+
 export type AgentTurnContext = {
   projectName?: string
   projectRoot?: string
@@ -691,6 +747,7 @@ export async function runAgentTurn(
 
   for (let step = 0; step < 14; step++) {
     if (stopIfAborted()) return session
+    let endTurnForReadBudget = false
     const assistantId = newId('msg')
     const live: AgentMessage = {
       id: assistantId,
@@ -812,6 +869,20 @@ export async function runAgentTurn(
             typeof args.explanation === 'string' && args.explanation.trim()
               ? `${args.explanation}\n\n${note}`
               : note
+        }
+                const readBudgetDenial = takePostClarifySpecReadDenial(session, call.function.name)
+        if (readBudgetDenial) {
+          session.messages.push({
+            id: call.id,
+            role: 'tool',
+            content: JSON.stringify(readBudgetDenial),
+            timestamp: new Date().toISOString()
+          })
+          live.content = live.content || 'Post-clarify specification read budget reached.'
+          markCallStatus(live, call.id, 'error', sink)
+          markRemainingToolCalls(live, 'done', sink)
+          endTurnForReadBudget = true
+          break
         }
         if (call.function.name === 'ask_clarification') {
           const options = Array.isArray(args.options)
@@ -1016,6 +1087,7 @@ export async function runAgentTurn(
           live.proposedChanges = patch
           live.pending = true
           session.context.pendingToolCallId = call.id
+          noteProposalEmitted(session)
           completeSiblingToolCalls(session, completion.toolCalls, call.id)
           markCallStatus(live, call.id, 'done', sink)
           markRemainingToolCalls(live, 'done', sink)
@@ -1160,6 +1232,7 @@ export async function runAgentTurn(
       markRemainingToolCalls(live, 'done', sink)
       saveSession(projectRoot, session)
       emit(sink, { kind: 'session', session })
+      if (endTurnForReadBudget) break
       needsContinuationNudge = false
       continue
     }
@@ -1314,6 +1387,7 @@ export async function resumeWithToolResult(
       if (m.clarification) {
         m.clarification.answer = clarificationDisplay ?? result
         m.resolution = 'answered'
+        noteAnsweredClarification(session)
       }
       if (m.proposedChanges) {
         if (payload.type === 'user_instruction') {

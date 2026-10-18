@@ -83,6 +83,12 @@ export type AgentSession = {
     permissions?: AgentSpecPermissions
     promptExtras?: string
     lastFailedWrite?: AgentFailedWrite
+    /** Fair post-clarify read budget (agentLoop). Pre-clarify uncapped; no force-propose. */
+    postClarifyReadBudget?: {
+      answeredClarifications: number
+      proposalsEmitted: number
+      consecutiveSpecReads: number
+    }
   }
 }
 

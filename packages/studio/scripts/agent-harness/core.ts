@@ -144,6 +144,7 @@ export async function runOnce(o: RunOptions): Promise<RunResult> {
   session = await runAgentTurn(session, runDir, ctx, userText)
 
   let approvals = 0
+  let clarificationsAnswered = 0
   let stopReason = 'agent finished'
   for (let guard = 0; guard < 20; guard++) {
     const pending = session.messages.find((m) => m.pending)
@@ -181,6 +182,7 @@ export async function runOnce(o: RunOptions): Promise<RunResult> {
       } else {
         answerText = UNMATCHED_CLARIFICATION_REPLY
       }
+      clarificationsAnswered++
       session = await resumeWithToolResult(session, runDir, ctx, toolId, answerText, undefined, !last)
       if (last) { stopReason = 'call budget reached'; break }
       continue
@@ -207,7 +209,10 @@ export async function runOnce(o: RunOptions): Promise<RunResult> {
     if (approvals >= maxApprovals) { stopReason = 'approval budget reached'; break }
   }
   writeFileSync(join(runDir, 'hybrid.asfl'), ctx.hybridAsfl ?? '')
-  writeFileSync(join(runDir, 'manifest.json'), JSON.stringify({ runId, promptHash: hash, informalSha256, skillId, approvals, maxApprovals, stopReason, temperature: PILOT_TEMPERATURE, ...o.manifestExtra }, null, 2))
+  if (stopReason === 'agent finished' && clarificationsAnswered > 0 && approvals === 0) {
+    stopReason = 'clarify_without_write'
+  }
+  writeFileSync(join(runDir, 'manifest.json'), JSON.stringify({ runId, promptHash: hash, informalSha256, skillId, approvals, maxApprovals, clarificationsAnswered, stopReason, temperature: PILOT_TEMPERATURE, ...o.manifestExtra }, null, 2))
   return { runId, runDir, condition: o.condition, promptHash: hash, approvals, stopReason, hybridChars: (ctx.hybridAsfl ?? '').length }
 }
 
