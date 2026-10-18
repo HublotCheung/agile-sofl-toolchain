@@ -10,6 +10,7 @@ import {
   removeType,
   removeVar
 } from './declarationPatch.js'
+import { patchProcessSignature, validateProcessSignature } from './signaturePatch.js'
 import type { FsfScenarioDto } from './fsfModel.js'
 import { addGuiScreen, patchGuiWidgetText } from './guiPatch.js'
 import {
@@ -80,6 +81,7 @@ export type HybridPatchOp =
   | {
       op: 'update'
       id: string
+      signature?: string
       name?: string
       text?: string
       pre?: string
@@ -895,6 +897,11 @@ function applyUpdate(source: string, op: Extract<HybridPatchOp, { op: 'update' }
       if (next === source) return err(`Cannot rename process "${resolved.name}"`)
     }
     const procName = op.name ?? resolved.name
+    if (op.signature !== undefined) {
+      const check = validateProcessSignature(op.signature)
+      if (!check.ok) return err(`Invalid process signature: ${check.error}`)
+      next = patchProcessSignature(next, resolved.moduleName, procName, op.signature)
+    }
     if (op.pre !== undefined) next = patchProcessCondition(next, procName, 'pre', op.pre)
     if (op.post !== undefined) next = patchProcessCondition(next, procName, 'post', op.post)
     if (op.comment !== undefined) next = patchComment(next, procName, op.comment)

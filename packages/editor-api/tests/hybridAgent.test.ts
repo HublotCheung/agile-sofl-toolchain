@@ -28,6 +28,17 @@ end_process
 end_module`
 
 describe('hybrid agent inventory and patch', () => {
+  it('updates process ports through CRUD without changing its body', () => {
+    const r = applyHybridPatch(SOURCE, { operations: [{ op: 'update', id: 'proc:Demo.P1', signature: '(x: nat, assigned: bool) ok: nat' }] })
+    expect(r.error).toBeUndefined()
+    expect(r.content).toBe(SOURCE.replace('(x: nat) ok: nat', '(x: nat, assigned: bool) ok: nat'))
+  })
+  it('rejects invalid process ports instead of silently accepting them', () => {
+    const r = applyHybridPatch(SOURCE, { operations: [{ op: 'update', id: 'proc:Demo.P1', signature: '(x: nat, x: bool) ok: nat' }] })
+    expect(r.error).toContain('Duplicate parameter')
+    expect(r.content).toBe(SOURCE)
+  })
+
   it('formatHybridInventory lists proc/type ids for a small module', () => {
     const text = formatHybridInventory(WITH_TYPE)
     expect(text).toContain('mod:Demo')

@@ -8,6 +8,8 @@ writeFileSync(join(userData, 'llm-profiles.json'), JSON.stringify({ activeId: nu
 vi.mock('electron', () => ({ app: { getPath: () => userData, getAppPath: () => userData }, ipcMain: { handle: () => undefined } }))
 
 import { promptHash, runOnce, UNMATCHED_CLARIFICATION_REPLY } from '../scripts/agent-harness/core'
+import { toApiMessages } from '../src/main/services/llm/agentLoop'
+import { generationAgentPermissions } from '../src/main/services/llm/agentTypes'
 
 function sse(chunks: unknown[]): Response {
   const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n'
@@ -22,6 +24,22 @@ const toolCall = (name: string, args: unknown) => sse([
 afterEach(() => vi.unstubAllGlobals())
 
 describe('headless agent harness', () => {
+  it('retains the task and latest steering after a long sequence of tool results', () => {
+    const messages: any[] = [{ id: 'u1', role: 'user', content: 'Original maintenance task' },
+      { id: 'u2', role: 'user', content: 'Keep the existing permissions' }]
+    for (let i = 0; i < 15; i++) {
+      messages.push({ id: `a${i}`, role: 'assistant', content: '', toolCalls: [
+        { id: `t${i}`, name: 'read_hybrid_specification', arguments: '{}' }
+      ] })
+      messages.push({ id: `t${i}`, role: 'tool', content: 'specification inventory' })
+    }
+    const result = toApiMessages({ messages, context: {} } as never,
+      { informalMarkdown: '', hybridAsfl: '' }, generationAgentPermissions())
+    expect(result.filter(m => m.role === 'user').map(m => m.content))
+      .toEqual(['Original maintenance task', 'Keep the existing permissions'])
+    const ids = result.flatMap(m => m.tool_calls?.map(c => c.id) ?? [])
+    expect(result.filter(m => m.role === 'tool').map(m => m.tool_call_id)).toEqual(ids)
+  })
   it('preserves and supplies an existing specification for a maintenance task', async () => {
     process.env.ECNU_API_KEY = 'sk-testtesttesttest'
     const source = 'module SYSTEM_Existing;\nprocess Keep (x: nat) y: nat\nFSF : others && y = x\nend_process\nend_module'
@@ -56,7 +74,10 @@ describe('headless agent harness', () => {
     const inf = join(mkdtempSync(join(tmpdir(), 'inf-')), 'x.aspec')
     writeFileSync(inf, '# Functions\n\n## A\n\nDo A.\n')
     const out = mkdtempSync(join(tmpdir(), 'harness-out-'))
-    const r = await runOnce({ condition, informalPath: inf, outDir: out, maxApprovals: 1 })
+    const events: Array<Record<string, unknown>> = []
+    const r = await runOnce({ condition, informalPath: inf, outDir: out, maxApprovals: 1, onStudyEvent: e => events.push(e) })
+    expect(events.find(e => e.type === 'proposal')).toMatchObject({ applied: true, tool: 'propose_hybrid_changes' })
+    expect(String(events.find(e => e.type === 'proposal')?.text)).toContain('SYSTEM_X')
     expect(r.approvals).toBe(1)
     const lines = readFileSync(join(r.runDir, '.agile-sofl', 'llm-calls.jsonl'), 'utf-8').trim().split('\n').map((l) => JSON.parse(l))
     const call = lines.find((l) => l.event === 'llm_call')

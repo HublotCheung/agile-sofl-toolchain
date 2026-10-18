@@ -331,7 +331,7 @@ ${refinementBlock}
 `
 }
 
-function toApiMessages(
+export function toApiMessages(
   session: AgentSession,
   ctx: AgentTurnContext,
   permissions: AgentSpecPermissions,
@@ -393,6 +393,15 @@ function toApiMessages(
     }
   }
   for (let i = Math.max(0, body.length - MAX_HISTORY); i < body.length; i++) startIndexes.add(i)
+  // Tool-heavy turns can push every user message outside MAX_HISTORY.
+  // Keep the original task and latest user steering alongside complete tool pairs.
+  const firstUser = body.findIndex((message) => message.role === 'user')
+  let lastUser = -1
+  for (let i = body.length - 1; i >= 0; i--) {
+    if (body[i]?.role === 'user') { lastUser = i; break }
+  }
+  if (firstUser >= 0) startIndexes.add(firstUser)
+  if (lastUser >= 0) startIndexes.add(lastUser)
   const trimmed = body.filter((_, i) => startIndexes.has(i))
   msgs.push(...trimmed)
   if (options?.continuation) {

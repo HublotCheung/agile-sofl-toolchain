@@ -200,6 +200,8 @@ export async function runOnce(o: RunOptions): Promise<RunResult> {
     }
     approvals++
     const tool = pending.toolCalls?.find((t) => t.id === toolId)?.name ?? (patch.target === 'hybrid' ? 'propose_hybrid_changes' : 'unknown')
+    o.onStudyEvent?.({ type: 'proposal', tool, applied, applyError,
+      text: JSON.stringify({ explanation: patch.explanation ?? '', operations: patch.operations }) })
     await o.onStep?.({ runId, runDir, step: approvals, hybrid: ctx.hybridAsfl ?? '', tool, applied, applyError })
     session = await resumeWithToolResult(session, runDir, ctx, toolId, JSON.stringify(payload), undefined, approvals < maxApprovals)
     if (approvals >= maxApprovals) { stopReason = 'approval budget reached'; break }
