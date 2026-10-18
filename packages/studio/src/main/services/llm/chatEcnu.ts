@@ -72,7 +72,12 @@ function combineAbortSignals(signals: AbortSignal[]): AbortSignal {
   return controller.signal
 }
 
-const CHAT_TIMEOUT_MS = 90_000
+/** Wall-clock timeout for one chat/completions call (headers + body stream). Lab models with long agent contexts often exceed 90s. Override with ECNU_CHAT_TIMEOUT_MS (ms, min 30000). */
+const CHAT_TIMEOUT_MS = (() => {
+  const fromEnv = Number(process.env.ECNU_CHAT_TIMEOUT_MS)
+  if (Number.isFinite(fromEnv) && fromEnv >= 30_000) return Math.floor(fromEnv)
+  return 300_000
+})()
 
 async function postChat(body: Record<string, unknown>, userSignal?: AbortSignal): Promise<Response> {
   const cfg = getEcnuConfig()
@@ -92,7 +97,7 @@ async function postChat(body: Record<string, unknown>, userSignal?: AbortSignal)
   }).catch((e: unknown) => {
     if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
       if (userSignal?.aborted) throw new ChatAbortedError()
-      throw new Error('ChatECNU timed out after 90s. Send again to continue.')
+      throw new Error(`ChatECNU timed out after ${Math.round(CHAT_TIMEOUT_MS / 1000)}s. Send again to continue.`)
     }
     throw e
   })
