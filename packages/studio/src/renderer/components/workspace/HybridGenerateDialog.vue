@@ -3,8 +3,6 @@ import { useTraceabilityStore } from '../../stores/traceability'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../../stores/workspace'
-import { useHistoryStore } from '../../stores/history'
-import { HistoryKinds } from '../../history/kinds'
 import CascadeStageChecks, { type CascadeStageValue } from '../ui/CascadeStageChecks.vue'
 import DiscreteSlider from '../ui/DiscreteSlider.vue'
 import SegmentedChoice from '../ui/SegmentedChoice.vue'
@@ -180,11 +178,7 @@ async function run(mode: 'preview' | 'selected' = 'preview'): Promise<string | n
 async function writeHybrid(text: string): Promise<void> {
   const tab = workspace.hybridTab
   if (!tab || !text) return
-  useHistoryStore().applyDocument(tab.id, text, {
-    kind: HistoryKinds.hybridEdit,
-    immediate: true
-  })
-  try { await useTraceabilityStore().recordGenerated(lastTraceLinks.value) }
+  try { await useTraceabilityStore().applyGeneratedContent(tab.content,text,lastTraceLinks.value) }
   catch (e) { error.value = String(e); return }
   emit('close')
 }

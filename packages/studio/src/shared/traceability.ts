@@ -32,6 +32,8 @@ export interface TraceLink {
   reason: string
   baseline: TraceBaseline
   deferred?: TraceBaseline
+  /** Acknowledging a notification never advances the synchronization baseline. */
+  acknowledged?: Partial<Record<TraceSide, TraceBaseline>>
   note?: string
 }
 export interface TraceDocument {

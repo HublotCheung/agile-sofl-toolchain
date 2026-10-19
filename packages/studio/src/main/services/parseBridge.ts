@@ -1,4 +1,5 @@
 import { registerTraceHandlers } from './traceService'
+import { generatedIRTraceLinks } from './traceEngine'
 import { acceptHybridWrite } from '../../shared/asflRepair'
 import { ipcMain } from 'electron'
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -298,7 +299,7 @@ export function registerParseHandlers(): void {
             ok: true as const,
             kind: 'document' as const,
             asflText: result.asflText,
-            traceLinks: result.traceLinks,
+            traceLinks: generatedIRTraceLinks(result.specification,result.asflText),
             warnings: result.warnings,
             specification: result.specification,
             changes: result.changes
@@ -316,7 +317,7 @@ export function registerParseHandlers(): void {
           ok: true as const,
           kind: 'document' as const,
           asflText: result.asflText,
-          traceLinks: result.traceLinks,
+          traceLinks: generatedIRTraceLinks(result.specification,result.asflText),
           warnings: result.warnings,
           specification: result.specification,
           changes: result.changes

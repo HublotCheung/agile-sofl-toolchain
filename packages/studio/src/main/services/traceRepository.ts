@@ -84,6 +84,7 @@ export function validateTrace(value: unknown): asserts value is TraceDocument {
       || typeof l.baseline?.informal !== 'string' || typeof l.baseline?.hybrid !== 'string'
       || d.entities.find(e => e.id === l.source)?.side !== 'informal' || d.entities.find(e => e.id === l.target)?.side !== 'hybrid') throw new Error('Invalid trace link metadata.')
     links.add(l.id)
+    for(const snapshot of Object.values(l.acknowledged??{}))if(!snapshot||typeof snapshot.informal!=='string'||typeof snapshot.hybrid!=='string')throw new Error('Invalid notification acknowledgement.')
     for(const e of l.evidence??[]){if(typeof e.requirementFragment!=='string'||typeof e.specificationFragment!=='string'||typeof e.baseline?.informal!=='string'||typeof e.baseline?.hybrid!=='string'||!e.baseline.informal.includes(e.requirementFragment)||!e.baseline.hybrid.includes(e.specificationFragment))throw new Error('Invalid trace evidence.')}
     if(l.assessment&&(!['unassessed','partial','supported','contradicted'].includes(l.assessment.result)||!['model','user'].includes(l.assessment.reviewer)||typeof l.assessment.baseline?.informal!=='string'||typeof l.assessment.baseline?.hybrid!=='string'||!Array.isArray(l.assessment.missingConstraints)||!l.assessment.missingConstraints.every(v=>typeof v==='string')))throw new Error('Invalid coverage assessment.')
   }

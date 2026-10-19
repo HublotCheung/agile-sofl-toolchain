@@ -1,10 +1,11 @@
 import { fileBelongsToRoot, filePathsEqual } from './tabUtils'
 import { applyRebindPlan, mergeTraceGraphs, relocateTraceDocument, type TraceRebindPlan, type TraceMergeConflict, type TraceStructurePreview } from '../../shared/traceAdvanced'
-import { computed, ref, watch } from 'vue'
+import { computed, effectScope, onScopeDispose, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useWorkspaceStore } from './workspace'
 import { useDocumentStore } from './document'
 import { useHistoryStore } from './history'
+import { bindGeneratedTrace, traceNotification, type GeneratedTraceLink } from '../../shared/traceInteraction'
 import { emptyTrace, linkBaseline, linkState, sameBaseline,
   type TraceDocument, type TraceEntity, type TraceLink, type TracePair, type TraceProposal, type TraceSide, type TraceIdentityHint } from '../../shared/traceability'
 
@@ -15,6 +16,7 @@ export const useTraceabilityStore = defineStore('traceability', () => {
   const error = ref(''), warnings = ref<string[]>([]), busy = ref(false), loading = ref(false)
   const proposal = ref<TraceProposal | null>(null)
   const opened = ref<TraceSide | null>(null)
+  const activeAnchor = ref<string | null>(null)
   const focusedId = ref<string | null>(null)
   const followSelection = ref(false)
   const structurePreview=ref<TraceStructurePreview|null>(null)
@@ -28,6 +30,9 @@ export const useTraceabilityStore = defineStore('traceability', () => {
   let remoteMerge:{base:TraceDocument;remote:TraceDocument}|null=null
   const recoveryRoots=new Set<string>()
   let started = false, timer: ReturnType<typeof setTimeout> | undefined
+  const observationScope = effectScope(true)
+  let disposeProgress: (()=>void)|undefined
+  onScopeDispose(()=>{observationScope.stop();disposeProgress?.();if(timer)clearTimeout(timer)})
   let activeKey = '', queue: Promise<unknown> = Promise.resolve()
   const renameHints: TraceIdentityHint[] = []
   function hintRename(side: TraceSide, locator: string, title: string,newLocator?:string): void { renameHints.push({ side, locator, title,newLocator,documentPath:side==='informal'?pair.value?.informalPath:pair.value?.hybridPath }) }
@@ -46,6 +51,19 @@ export const useTraceabilityStore = defineStore('traceability', () => {
   const pending = computed(() => document.value.links.filter(l => l.review === 'confirmed' && linkState(document.value, l) !== 'current'
     && !sameBaseline(l.deferred, linkBaseline(document.value, l))))
   const suggested = computed(() => document.value.links.filter(l => l.review === 'suggested'))
+  const notifications = (side: TraceSide) => document.value.links.filter(l => traceNotification(document.value, l, side))
+  async function acknowledge(id: string, side: TraceSide): Promise<void> {
+    await guarded(() => change('Acknowledge source change', doc => {
+      const link = doc.links.find(l => l.id === id)
+      if (link) link.acknowledged = { ...link.acknowledged, [side]: linkBaseline(doc, link) }
+    }))
+  }
+  async function editRelated(id: string, side: TraceSide): Promise<void> {
+    const link = document.value.links.find(l => l.id === id)
+    const entity = document.value.entities.find(e => e.id === (side === 'informal' ? link?.source : link?.target))
+    if (entity) await reveal(entity)
+    opened.value = null; activeAnchor.value = null
+  }
   const proposalStale = computed(() => !!proposal.value && (!pair.value || proposal.value.informal !== pair.value.informal || proposal.value.hybrid !== pair.value.hybrid || proposal.value.revision !== document.value.revision))
   function serial<T>(fn: () => Promise<T>): Promise<T> {
     const job = queue.then(fn)
@@ -101,7 +119,8 @@ export const useTraceabilityStore = defineStore('traceability', () => {
     if (started) return
     started = true
     if(window.studio?.traceProviders)void window.studio.traceProviders().then(p=>{availableProviders.value=p}).catch(()=>{})
-    window.studio?.traceOnProgress?.(value=>{if(pair.value?.root===value.root)progress.value=value})
+    disposeProgress=window.studio?.traceOnProgress?.(value=>{if(pair.value?.root===value.root)progress.value=value})
+    observationScope.run(()=>{
     watch(pair, (next, previous) => {
       if (timer) clearTimeout(timer)
       if (!next || !previous || keyOf(next) !== keyOf(previous)) {
@@ -113,6 +132,7 @@ export const useTraceabilityStore = defineStore('traceability', () => {
       if (!followSelection.value || !opened.value) return
       const current = selectedEntity(opened.value)
       if (current) focusedId.value = current.id
+    })
     })
   }
   async function guarded(fn: () => Promise<void>): Promise<void> {
@@ -144,6 +164,8 @@ export const useTraceabilityStore = defineStore('traceability', () => {
     return present.value.find(e => e.side === side && e.parent === s.moduleName && e.title === title && (!e.documentPath||filePathsEqual(absolutePath(e.documentPath),workspace.hybridTab!.filePath!)))
   }
   function open(side: TraceSide, locator?: string): void {
+    activeAnchor.value = null
+    proposal.value = null
     opened.value = opened.value === side && !locator ? null : side
     focusedId.value = (locator ? present.value.find(e => e.side === side && e.locator === locator && (!e.documentPath||filePathsEqual(absolutePath(e.documentPath),(side==='informal'?workspace.informalTab:workspace.hybridTab)!.filePath!))) : selectedEntity(side))?.id ?? null
   }
@@ -194,7 +216,7 @@ export const useTraceabilityStore = defineStore('traceability', () => {
       await change('Recover trace links', doc => {
         if (doc.revision !== result.revision) throw new Error('Trace links changed. Run recovery again.')
         const ids = new Set(result.links.map(l => l.id))
-        doc.links = [...doc.links.filter(l => !ids.has(l.id)), ...result.links]
+        doc.links = [...doc.links.filter(l => !ids.has(l.id)), ...result.links.map(l => ({...l,review:'confirmed' as const}))]
       })
       if (!result.links.length) warnings.value = ['No new trace candidates found. You can create a link manually.']
     })
@@ -255,22 +277,32 @@ export const useTraceabilityStore = defineStore('traceability', () => {
       })
     })
   }
-  async function recordGenerated(links: Array<{ sourceId: string; targetId: string; relation?: string }>): Promise<void> {
-    if (!links.length || !pair.value) return
-    const commandId = history.undoCommand?.id
-    const unresolved: string[] = []
-    await change('Generated trace links', doc => {
-      for (const generated of links) {
-        const source = doc.entities.find(e => e.present && e.side === 'informal' && e.locator === generated.sourceId && (!e.documentPath||filePathsEqual(absolutePath(e.documentPath),pair.value!.informalPath)))
-        const targets = doc.entities.filter(e => e.present && e.side === 'hybrid' && (e.locator === generated.targetId || e.title === generated.targetId))
-        const target = targets.length === 1 ? targets[0] : undefined
-        if (!source || !target) { unresolved.push(`${generated.sourceId} → ${generated.targetId}`); continue }
-        if (doc.links.some(l => l.source === source.id && l.target === target.id && l.review !== 'rejected')) continue
-        const endpoints = { source: source.id, target: target.id }
-        doc.links.push({ ...endpoints, id: crypto.randomUUID(), origin: 'generated', review: 'confirmed', relation: generated.relation === 'constrains' ? 'constrains' : 'refines', reason: 'Recorded from an applied generation result.', baseline: linkBaseline(doc, endpoints) })
-      }
-    }, commandId)
-    if (unresolved.length) warnings.value = [`Some generation links require manual matching: ${unresolved.join(', ')}`]
+  async function applyGeneratedContent(beforeText: string, next: string, links: GeneratedTraceLink[]): Promise<void> {
+    await history.flushRegistered()
+    if (!pair.value) throw new Error('Open and save the project Informal and Hybrid files before applying modeled nodes.')
+    if (pair.value.hybrid !== beforeText) throw new Error('The specification changed. Generate a new preview.')
+    await refreshNow()
+    const p = clone(pair.value!), before = clone(document.value)
+    const nextPair = {...p,hybrid:next,documents:p.documents?.map(d=>filePathsEqual(absolutePath(d.path),p.hybridPath)?{...d,content:next}:d)}
+    const result = await window.studio!.traceRead(nextPair)
+    assertPair(p)
+    if (result.document.revision !== before.revision) throw new Error('Project changed during modeling. Retry the preview.')
+    bindGeneratedTrace(before,result.document,links,p.informalPath,p.hybridPath,()=>crypto.randomUUID())
+    const tab = workspace.hybridTab!
+    const changes = [{path:p.hybridPath,side:'hybrid' as const,before:beforeText,after:next}]
+    const journalId = window.studio?.traceStage ? await window.studio.traceStage(p,result.document,changes) : null
+    await serial(async()=>{
+      try {
+        assertPair(p)
+        const saved = await window.studio!.traceSave(p,result.document,before.revision)
+        try { assertPair(p) } catch(e) { document.value=await window.studio!.traceSave(p,before,saved.revision);throw e }
+        documents.setContent(tab.id,next); document.value=saved
+        if(journalId)history.registerEffect('trace-transaction:'+journalId,async state=>{await window.studio!.traceFinish(p,journalId,state as 'buffers-applied'|'discarded')})
+        history.commit({kind:'traceability',label:'Apply modeling with source bindings',immediate:true,mutations:[{tabId:tab.id,filePath:p.hybridPath,before:beforeText,after:next}],effects:[{key:effectKey(p),before:JSON.stringify(before),after:JSON.stringify(saved)},...(journalId?[{key:'trace-transaction:'+journalId,before:'discarded',after:'buffers-applied'}]:[])]})
+      } catch(e) { if(journalId)await window.studio!.traceFinish(p,journalId,'discarded');throw e }
+    })
+    if(journalId)await window.studio!.traceFinish(p,journalId,'buffers-applied').catch(e=>{warnings.value=[String(e)]})
+    void workspace.resyncModulesFromOpenTabs()
   }
   async function rebind(plan:TraceRebindPlan):Promise<void> {
     await guarded(()=>change('Rebind trace links',doc=>{const result=applyRebindPlan(doc,plan,()=>crypto.randomUUID());doc.links=result.links}))
@@ -360,5 +392,5 @@ export const useTraceabilityStore = defineStore('traceability', () => {
   }
   async function relocateFile(from:string,to:string):Promise<void>{await guarded(()=>change('Relocate trace document',doc=>{const next=relocateTraceDocument(doc,from,to).document;doc.entities=next.entities;doc.links=next.links;doc.files=next.files}))}
   return { document, error, warnings, busy, loading, proposal, proposalStale, opened, focusedId, followSelection,
-    pair, present, pending, suggested, start, refreshNow, open, reveal, manual, review, recover, suggest, applyProposal, recordGenerated, hintRename, rebind, reviewMany, absolutePath, graphVisible, providerId, availableProviders, structurePreview, previewStructure, applyStructure, analysisMode, progress, assess, recoveries, recoverTransaction, saveLinkedFiles, mergePreview, importReview, exportReview, applyMerge, relocateFile }
+    pair, present, pending, suggested, notifications, acknowledge, editRelated, activeAnchor, applyGeneratedContent, start, refreshNow, open, reveal, manual, review, recover, suggest, applyProposal, hintRename, rebind, reviewMany, absolutePath, graphVisible, providerId, availableProviders, structurePreview, previewStructure, applyStructure, analysisMode, progress, assess, recoveries, recoverTransaction, saveLinkedFiles, mergePreview, importReview, exportReview, applyMerge, relocateFile }
 })

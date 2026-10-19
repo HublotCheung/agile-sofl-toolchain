@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useTraceabilityStore } from '../../stores/traceability'
-import { linkState } from '../../../shared/traceability'
+import { traceNotification } from '../../../shared/traceInteraction'
 import { filePathsEqual } from '../../stores/tabUtils'
 import { ref, watch, onMounted, onUnmounted, shallowRef, computed, nextTick } from 'vue'
 import type * as Monaco from 'monaco-editor'
@@ -59,8 +59,8 @@ function installTraceLenses(){
     onDidChange:traceLensEvent.event,
     provideCodeLenses(model){
       if(model!==editor.value?.getModel())return {lenses:[],dispose(){}}
-      return {lenses:traceEntities().map(e=>{
-        const p=model.getPositionAt(e.start),links=trace.document.links.filter(l=>l.review!=='rejected'&&[l.source,l.target].includes(e.id)),pending=links.some(l=>l.review==='suggested'||linkState(trace.document,l)!=='current')
+        return {lenses:traceEntities().filter(e=>trace.document.links.some(l=>l.review!=='rejected'&&[l.source,l.target].includes(e.id))).map(e=>{
+          const p=model.getPositionAt(e.start),links=trace.document.links.filter(l=>l.review!=='rejected'&&[l.source,l.target].includes(e.id)),pending=links.some(l=>traceNotification(trace.document,l,e.side))
         return {range:new monaco.Range(p.lineNumber,1,p.lineNumber,1),command:{id:command,title:t('trace.links')+' '+links.length+(pending?' •':''),arguments:[e.id]}}
       }),dispose(){}}
     }

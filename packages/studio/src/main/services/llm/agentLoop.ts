@@ -1,3 +1,4 @@
+import { informalEntities } from '../traceEngine'
 import { chatEcnuStream, isChatAborted, type ChatMessage, type ChatStreamDelta } from './chatEcnu'
 import { getEcnuConfig } from './profiles'
 import { reasoningEffortFor } from './chatEcnu'
@@ -1083,6 +1084,16 @@ export async function runAgentTurn(
             live.content = live.content || `Patch rejected: ${validity.message}`
             markCallStatus(live, call.id, 'error', sink)
             continue
+          }
+          if (target === 'hybrid' && ctx.informalMarkdown.trim()) {
+            const sources = new Set(informalEntities(ctx.informalMarkdown).map(e=>e.locator))
+            const createsNodes = patch.operations.some(op=>op.op==='add'&&!['module','gui-screen','scenario'].includes(String(op.kind)))
+            const invalid = patch.traceLinks?.some(l=>!sources.has(l.sourceId)||!l.targetId)
+            if (invalid || (createsNodes && sources.size > 0 && !patch.traceLinks?.length)) {
+              session.messages.push({id:call.id,role:'tool',content:JSON.stringify({ok:false,error:'Missing or invalid modeling provenance.',next:'Read the Informal inventory. Re-propose the patch with traceLinks containing exact sourceId and fully qualified targetId for each new semantic node. Fix this yourself; do not ask the user to manage links.'}),timestamp:new Date().toISOString()})
+              markCallStatus(live,call.id,'error',sink)
+              continue
+            }
           }
           live.content =
             patch.explanation ||

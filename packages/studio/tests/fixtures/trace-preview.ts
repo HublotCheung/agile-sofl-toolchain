@@ -34,6 +34,7 @@ window.studio = {
  traceStage:async()=>crypto.randomUUID(),
  traceSaveFiles:async()=>{},
  traceRead:async()=>({document:clone(disk),warnings:[]}),
+ tracePrepare:async(p,proposal,selected)=>{const content=p.hybrid.replace('maxBooks = 5','maxBooks = 8');const next=clone(disk);for(const e of next.entities.filter(e=>e.side==='hybrid')){e.text=e.text.replace('maxBooks = 5','maxBooks = 8');e.context=e.context.replace('maxBooks = 5','maxBooks = 8')}return {content,document:next,changes:[{path:'s.asfl',side:'hybrid',before:p.hybrid,after:content}]}},
  traceSave:async(_p,d,revision)=>{disk={...clone(d),revision:revision+1};return clone(disk)},
  traceRecover:async()=>({links:[],informal,hybrid,revision:disk.revision}),
  traceCancel:async()=>{},
@@ -44,8 +45,11 @@ const at=doc.newTab({content:informal,documentKind:'aspec'}),bt=doc.newTab({cont
 doc.markSaved(at.id,'D:/trace-preview/r.aspec','r.aspec');doc.markSaved(bt.id,'D:/trace-preview/s.asfl','s.asfl')
 ws.projects=[{id:'preview',name:'Library',rootPath:'D:/trace-preview',createdAt:0,lastOpenedAt:0}];ws.activeProjectId='preview'
 ws.scan={root:'D:/trace-preview',manifest:{version:'1.0',name:'Library',informal:'r.aspec',hybrid:['s.asfl']},files:[{kind:'aspec',path:at.filePath!},{kind:'asfl',path:bt.filePath!}],modules:[]}
-const trace=useTraceabilityStore();await trace.refreshNow();trace.opened='informal'
-createApp({render:()=>h('main',{class:'mx-auto my-6 max-w-3xl rounded-xl border border-border-subtle bg-surface-base p-4 text-content-primary'},[
- h('header',{class:'mb-3 flex items-center gap-3'},[h('h1',{class:'text-lg font-semibold'},'Agile SOFL Studio · Library'),h(TraceBadge,{side:'informal'})]),
- h(TraceWorkbench,{side:'informal'}),h('p',{class:'p-5 text-content-muted'},'Informal / Hybrid editor area — visual verification fixture')
+const trace=useTraceabilityStore();await trace.refreshNow()
+createApp({render:()=>h('main',{class:'mx-auto my-10 max-w-5xl rounded-xl border border-border-subtle bg-surface-base p-6 text-content-primary'},[
+ h('header',{class:'mb-6'},[h('h1',{class:'text-lg font-semibold'},'Agile SOFL Studio · Library'),h('p',{class:'mt-1 text-xs text-content-muted'},'借阅规则建模')]),
+ h('div',{class:'grid grid-cols-2 gap-6'},[
+   h('section',{class:'rounded-lg border border-border-subtle bg-surface-raised p-4'},[h('header',{class:'mb-4 flex items-center justify-between'},[h('span',{class:'text-xs text-content-muted'},'Informal'),h(TraceBadge,{side:'informal'})]),h(TraceWorkbench,{side:'informal'}),h('div',{class:'mb-3 flex items-center gap-2'},[h('h2',{class:'font-semibold'},'借阅图书'),h(TraceBadge,{side:'informal',locator:a.locator})]),h('p',{},a.text)]),
+   h('section',{class:'rounded-lg border border-border-subtle bg-surface-raised p-4'},[h('header',{class:'mb-4 flex items-center justify-between'},[h('span',{class:'text-xs text-content-muted'},'Hybrid'),h(TraceBadge,{side:'hybrid'})]),h(TraceWorkbench,{side:'hybrid'}),h('div',{class:'mb-3 flex items-center gap-2'},[h('h2',{class:'font-semibold'},'Borrow'),h(TraceBadge,{side:'hybrid',locator:b.locator})]),h('pre',{class:'whitespace-pre-wrap text-xs leading-6'},ws.hybridTab?.content),h('div',{class:'mt-4 flex gap-3 text-xs text-content-muted'},[h('button',{onClick:()=>import('../../src/renderer/stores/history').then(m=>m.useHistoryStore().undo())},'撤销'),h('button',{onClick:()=>import('../../src/renderer/stores/history').then(m=>m.useHistoryStore().redo())},'重做')])])
+ ]),h('p',{class:'mt-6 text-[11px] text-content-muted'},'交互验证样例 · 真实组件，模型和文件服务使用测试替身')
 ])}).use(pinia).use(i18n).mount('#app')

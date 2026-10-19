@@ -23,7 +23,7 @@
     "postbuild": "npm run stage:parse-bridge",
     "preview": "npm run build && electron-vite preview --skipBuild",
     "test": "vitest run",
-    "test:trace": "vitest run tests/traceability.test.ts tests/traceAdvanced.test.ts tests/traceService.test.ts tests/traceStore.test.ts --maxWorkers=2 --minWorkers=1",
+    "test:trace": "vitest run tests/traceability.test.ts tests/traceAdvanced.test.ts tests/traceService.test.ts tests/traceStore.test.ts tests/traceInteraction.test.ts tests/traceUx.test.ts tests/traceEditorSetup.test.ts --maxWorkers=2 --minWorkers=1",
     "eval:trace": "node scripts/trace-evaluate.mjs"
   },
   "dependencies": {

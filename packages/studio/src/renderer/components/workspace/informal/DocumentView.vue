@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useTraceabilityStore } from '../../../stores/traceability'
-import { linkState } from '../../../../shared/traceability'
+import { traceNotification } from '../../../../shared/traceInteraction'
+import TraceBadge from '../TraceBadge.vue'
 import { filePathsEqual } from '../../../stores/tabUtils'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -36,7 +37,7 @@ function syncTraceAnchors(){
     const position=heading.getBoundingClientRect(),top=position.top-rect.top
     if(top<28||top>rect.height-20)continue
     const links=trace.document.links.filter(l=>l.review!=='rejected'&&l.source===entity.id)
-    anchors.push({id:entity.id,locator:entity.locator,top,count:links.length,pending:links.some(l=>l.review==='suggested'||linkState(trace.document,l)!=='current')})
+    if(links.length)anchors.push({id:entity.id,locator:entity.locator,top,count:links.length,pending:links.some(l=>traceNotification(trace.document,l,'informal'))})
   }
   traceAnchors.value=anchors
 }
@@ -268,7 +269,7 @@ defineExpose({ revealSpan })
   <div v-if="tabId && tab" class="informal-md-shell relative h-full min-h-0 min-w-0">
     <div ref="host" class="informal-vditor h-full min-h-0" />
     <div class="pointer-events-none absolute inset-0 z-10" :aria-label="t('trace.links')">
-      <button v-for="a in traceAnchors" :key="a.id" type="button" class="pointer-events-auto absolute right-2 rounded border border-border-subtle bg-surface-raised px-1.5 py-0.5 text-[10px] shadow-sm" :class="a.pending?'text-semantic-warning':'text-accent'" :style="{top:a.top+'px'}" :title="t('trace.openHint')" @mousedown.prevent @click="trace.open('informal',a.locator)">{{ t('trace.links') }} {{ a.count }}{{ a.pending?' •':'' }}</button>
+      <div v-for="a in traceAnchors" :key="a.id" class="pointer-events-auto absolute right-2" :style="{top:a.top+'px'}" @mousedown.prevent><TraceBadge side="informal" :locator="a.locator" /></div>
     </div>
   </div>
   <p v-else class="p-4 text-xs text-content-muted">{{ $t('workspace.noInformal') }}</p>

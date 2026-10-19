@@ -32,11 +32,7 @@ async function onApplyHybridPatch(
   const result = await applyHybridDocumentPatch(patch, {
     noTab: t('agent.noHybridTab'),
     applyFailed: t('agent.applyFailed')
-  })
-  if (result.applied && patch.traceLinks?.length) {
-    const trace = useTraceabilityStore()
-    try { await trace.recordGenerated(patch.traceLinks) } catch (e) { trace.error = String(e) }
-  }
+  }, (before,after)=>useTraceabilityStore().applyGeneratedContent(before,after,patch.traceLinks??[]))
   return result
 }
 </script>

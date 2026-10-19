@@ -1,9 +1,34 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { parseAspec, aspecToInformal, parseInformalSpec, detectAspecFormat } from '@agile-sofl/aspec'
 import { buildVisualModelTolerant, type VisualModelResult } from '@agile-sofl/editor-api'
+import type { HybridSpecificationIR } from '@agile-sofl/aspec'
+import type { GeneratedTraceLink } from '../../shared/traceInteraction'
+import { asflSafeInvariant } from '@agile-sofl/aspec/dist/refine/refineToAsfl.js'
 import {
   canonicalTraceText, reconcileEntities, type TraceDocument, type TraceEntity, type TracePair, type TraceIdentityHint
 } from '../../shared/traceability'
+
+/** Rule/IR generators know provenance already; convert it to exact printed inventory IDs. */
+export function generatedIRTraceLinks(ir: HybridSpecificationIR, source: string): GeneratedTraceLink[] {
+  const entities = hybridEntities(source).entities
+  const modules = ir.modules?.length ? ir.modules : [{name:ir.moduleName,...ir}]
+  const normalize = (name:string)=>name.replace(/^SYSTEM_/,'').toLowerCase()
+  const links: GeneratedTraceLink[] = []
+  for(const module of modules) {
+    const groups = [['process',module.processes],['type',module.types],['variable',module.variables],['invariant',module.invariants]] as const
+    for(const [kind,members] of groups) for(const [index,member] of members.entries()) {
+      if(!member.informalId)continue
+      const scoped=entities.filter(e=>e.kind===kind&&normalize(e.parent)===normalize(module.name))
+      const predicate='description' in member?canonicalTraceText(asflSafeInvariant(String(member.description))).replace(/;$/,''):''
+      const matches=kind==='invariant'
+        ? scoped.length===members.length&&canonicalTraceText(scoped[index]?.text??'').replace(/;$/,'')===predicate ? [scoped[index]] : scoped.filter(e=>canonicalTraceText(e.text).replace(/;$/,'')===predicate)
+        : scoped.filter(e=>e.title===member.name)
+      if(matches.length!==1)throw new Error(`Cannot resolve generated provenance for ${module.name}.${member.name}.`)
+      links.push({sourceId:member.informalId,targetId:matches[0].locator,relation:kind==='invariant'?'constrains':kind==='process'?'refines':'uses'})
+    }
+  }
+  return links
+}
 
 function base(side: TraceEntity['side'], locator: string, kind: string, title: string, parent: string, text: string, start: number, end: number): TraceEntity {
   return { id: '', side, locator, kind, title, parent, text, shape: '', context: text,
