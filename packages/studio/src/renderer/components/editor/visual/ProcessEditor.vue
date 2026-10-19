@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TraceBadge from '../../workspace/TraceBadge.vue'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ExtVarItem, PatchDocumentPayload, VisualModuleProcess } from '../../../preload/index'
@@ -198,6 +199,7 @@ defineExpose({
 
 <template>
   <div class="space-y-4">
+    <TraceBadge side="hybrid" :locator="`proc:${moduleName}.${processName}`" />
     <div
       v-if="disabled"
       class="rounded-md border border-semantic-warning/40 bg-semantic-warning/10 px-3 py-2 text-sm text-semantic-warning"

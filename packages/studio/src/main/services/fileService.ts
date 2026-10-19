@@ -1,8 +1,11 @@
-import { dialog, ipcMain, shell, type BrowserWindow } from 'electron'
+import { dialog, ipcMain, shell, type BrowserWindow, type OpenDialogOptions, type SaveDialogOptions } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { getLastDialogDir, rememberDialogPath } from './dialogState.js'
 import { writeModuleArtifacts } from './dualSave.js'
+
+const showOpenDialog=(win:BrowserWindow|null,options:OpenDialogOptions)=>win?dialog.showOpenDialog(win,options):dialog.showOpenDialog(options)
+const showSaveDialog=(win:BrowserWindow|null,options:SaveDialogOptions)=>win?dialog.showSaveDialog(win,options):dialog.showSaveDialog(options)
 
 export function registerFileHandlers(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle('studio:file-read', async (_event, filePath: string) => {
@@ -22,20 +25,21 @@ export function registerFileHandlers(getWindow: () => BrowserWindow | null): voi
     return { filePath, title: basename(filePath), dualSave }
   })
 
-  ipcMain.handle('studio:file-open-dialog', async (_event, kind?: 'asfl' | 'aspec' | 'any') => {
+  ipcMain.handle('studio:file-open-dialog', async (_event, kind?: 'asfl' | 'aspec' | 'any' | 'json') => {
     const win = getWindow()
     const lastDir = await getLastDialogDir()
     const filters =
-      kind === 'aspec'
+      kind === 'json' ? [{name:'JSON',extensions:['json']}] : kind === 'aspec'
         ? [{ name: 'Informal Spec', extensions: ['aspec'] }]
         : kind === 'asfl'
           ? [{ name: 'Hybrid Spec', extensions: ['asfl'] }]
           : [
               { name: 'Agile-SOFL Specs', extensions: ['asfl', 'aspec'] },
               { name: 'Hybrid (.asfl)', extensions: ['asfl'] },
-              { name: 'Informal (.aspec)', extensions: ['aspec'] }
+              { name: 'Informal (.aspec)', extensions: ['aspec'] },
+              { name: 'All files', extensions: ['*'] }
             ]
-    const result = await dialog.showOpenDialog(win ?? undefined, {
+    const result = await showOpenDialog(win, {
       filters,
       properties: ['openFile'],
       defaultPath: lastDir
@@ -49,13 +53,13 @@ export function registerFileHandlers(getWindow: () => BrowserWindow | null): voi
 
   ipcMain.handle(
     'studio:file-save-dialog',
-    async (_event, defaultName?: string, kind: 'asfl' | 'aspec' = 'asfl') => {
+    async (_event, defaultName?: string, kind: 'asfl' | 'aspec' | 'json' = 'asfl') => {
       const win = getWindow()
       const lastDir = await getLastDialogDir()
-      const ext = kind === 'aspec' ? 'aspec' : 'asfl'
+      const ext = kind === 'json' ? 'json' : kind === 'aspec' ? 'aspec' : 'asfl'
       const defaultPath = defaultName ?? `untitled.${ext}`
-      const result = await dialog.showSaveDialog(win ?? undefined, {
-        filters: [{ name: kind === 'aspec' ? 'Informal Spec' : 'Hybrid Spec', extensions: [ext] }],
+      const result = await showSaveDialog(win, {
+        filters: [{ name: kind === 'json' ? 'JSON' : kind === 'aspec' ? 'Informal Spec' : 'Hybrid Spec', extensions: [ext] }],
         defaultPath: lastDir ? joinLastDir(lastDir, defaultPath) : defaultPath
       })
       if (result.canceled || !result.filePath) return null
@@ -67,7 +71,7 @@ export function registerFileHandlers(getWindow: () => BrowserWindow | null): voi
   ipcMain.handle('studio:open-project-folder', async () => {
     const win = getWindow()
     const lastDir = await getLastDialogDir()
-    const result = await dialog.showOpenDialog(win ?? undefined, {
+    const result = await showOpenDialog(win, {
       properties: ['openDirectory'],
       defaultPath: lastDir
     })

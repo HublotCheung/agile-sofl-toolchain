@@ -1,0 +1,22 @@
+{
+  "description": "Small synthetic regression cases; not the paper's dataset or a model-quality claim.",
+  "cases": [
+    {
+      "name": "Borrowing, renamed process and a negative requirement",
+      "requirements": [
+        {"id":"r1","title":"Borrow","content":"borrow books within reader limit"},
+        {"id":"r2","title":"Notify","content":"send overdue email notification"}
+      ],
+      "processes": [{"id":"p1","title":"Checkout","content":"borrow books reader limit"}],
+      "expected": [{"source":"r1","target":"p1"}],
+      "predicted": [{"source":"r1","target":"p1"}]
+    },
+    {
+      "name": "A requirement implemented by two processes",
+      "requirements": [{"id":"r1","title":"Withdraw","content":"validate balance and withdraw cash"}],
+      "processes": [{"id":"p1","title":"Validate","content":"validate balance"},{"id":"p2","title":"Pay","content":"withdraw cash"}],
+      "expected": [{"source":"r1","target":"p1"},{"source":"r1","target":"p2"}],
+      "predicted": [{"source":"r1","target":"p1"},{"source":"r1","target":"p2"}]
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { useTraceabilityStore } from '../stores/traceability'
 import { computed, ref, watch, type Ref } from 'vue'
 import { useDocumentStore } from '../stores/document'
 import { useHistoryStore } from '../stores/history'
@@ -112,6 +113,9 @@ export function useInformalSpec(tabId: Ref<string | undefined>) {
     if (!result.ok) return { ok: false, error: result.error || 'Patch failed.', applied: false }
     const applied = result.content !== current.content
     if (applied) {
+      for (const op of patch.operations) {
+        if (op.op === 'update' && typeof op.id === 'string' && typeof op.title === 'string') useTraceabilityStore().hintRename('informal', op.id, op.title)
+      }
       history.applyDocument(current.id, result.content, {
         kind: HistoryKinds.informalEdit,
         immediate: true

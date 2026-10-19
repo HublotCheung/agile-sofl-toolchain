@@ -194,6 +194,7 @@ const createTitle = computed(() => {
     </section>
 
     <ProcessGridPanel
+      :module-name="module.name"
       :processes="module.processes"
       :disabled="disabled"
       :edit-disabled="formDisabled"

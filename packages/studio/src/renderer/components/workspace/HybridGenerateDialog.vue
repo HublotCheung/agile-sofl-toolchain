@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useTraceabilityStore } from '../../stores/traceability'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../../stores/workspace'
@@ -44,6 +45,7 @@ const moduleSplit = ref<'ask' | 'single-system' | 'cluster-by-function'>('ask')
 const inferUnstated = ref(true)
 const preview = ref('')
 const lastSpec = ref<unknown>(null)
+const lastTraceLinks = ref<Array<{sourceId: string; targetId: string; relation?: string}>>([])
 const changes = ref<ChangeItem[]>([])
 const selected = ref<Record<string, boolean>>({})
 const warnings = ref<string[]>([])
@@ -158,6 +160,7 @@ async function run(mode: 'preview' | 'selected' = 'preview'): Promise<string | n
       emit('close')
       return null
     }
+    lastTraceLinks.value = (result.traceLinks ?? []) as typeof lastTraceLinks.value
     if (mode === 'preview') {
       preview.value = result.asflText
       warnings.value = result.warnings.map((w: { message: string }) => w.message)
@@ -174,13 +177,15 @@ async function run(mode: 'preview' | 'selected' = 'preview'): Promise<string | n
   }
 }
 
-function writeHybrid(text: string): void {
+async function writeHybrid(text: string): Promise<void> {
   const tab = workspace.hybridTab
   if (!tab || !text) return
   useHistoryStore().applyDocument(tab.id, text, {
     kind: HistoryKinds.hybridEdit,
     immediate: true
   })
+  try { await useTraceabilityStore().recordGenerated(lastTraceLinks.value) }
+  catch (e) { error.value = String(e); return }
   emit('close')
 }
 

@@ -83,7 +83,7 @@ Pipeline:
 1. read_refinement_state (tree or summary) plus Informal/Hybrid inventories. Identify the named module/process/data item from the user message, or ask_clarification if several slices are open.
 2. Prefer propose_refinement_step: FormalizePredicate, DecomposeProcess, SetCdfd, DeclareAtomic, IntroduceRetrieve, DischargeDataObligation, DefineType, ClassifyGrain, ResolveVariation.
    Grain: read the digest. ask_clarification only about variations already extracted (and name-claim). Then ClassifyGrain (grainClass=operation|abstract) or ResolveVariation (variationId, disposition=scenario|child|waived, toText=child process name, note required when waived). Do not invent a CRUD catalog. Do not clear grainAmbiguity by rewriting pre/post; that counter drops only after those steps or DecomposeProcess. DeclareAtomic requires operational grain to be closed.
-3. Use propose_hybrid_changes for new types/vars/processes/scenarios when the shell is empty. Never treat missing members as done.
+3. Use propose_hybrid_changes for new types/vars/processes/scenarios when the shell is empty. Include traceLinks with exact Informal sourceId and fully qualified Hybrid targetId for every derived node. Never treat missing members as done.
 4. If CRUD/refinement-step cannot express the fix, read_hybrid_specification view=source then propose_source_edit (replace/append). Informal atoms still need a FormalizePredicate step afterwards or ambiguity will not drop.
 5. CDFD is optional on old files; write one only when the user asks to draft/complete a diagram or a process must appear on the current module graph.
 6. After each applied write, read_refinement_state. Stay on the chosen slice until that local gap shrinks. Then if more gaps remain, ask_clarification for the next slice — do not claim an unambiguous spec while the digest says unambiguous=false.
@@ -267,6 +267,11 @@ export const AGENT_TOOLS = [
         type: 'object',
         properties: {
           explanation: { type: 'string' },
+          traceLinks: {
+            type: 'array',
+            description: 'When deriving Hybrid nodes from Informal requirements, include their exact source inventory IDs and fully qualified target IDs (proc:Module.Name, type:Module.Name). These links are recorded only when the user applies the patch.',
+            items: { type: 'object', properties: { sourceId: { type: 'string' }, targetId: { type: 'string' }, relation: { type: 'string', enum: ['refines', 'constrains', 'uses'] } }, required: ['sourceId', 'targetId'] }
+          },
           operations: {
             type: 'array',
             items: {

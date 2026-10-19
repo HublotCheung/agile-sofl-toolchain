@@ -6,6 +6,7 @@ import type {
   HistoryCommand,
   HistoryCommitInput,
   HistoryMutation,
+  HistoryEffect,
   HistorySelection
 } from '../history/types'
 import { useDocumentStore } from './document'
@@ -24,6 +25,19 @@ export const useHistoryStore = defineStore('studioHistory', () => {
   const applying = ref(false)
   const pending = shallowRef<PendingCommit | null>(null)
   const flushers = new Set<() => void | Promise<void>>()
+  const effectHandlers = new Map<string, (value: string) => void | Promise<void>>()
+  function registerEffect(key: string, handler: (value: string) => void | Promise<void>): () => void {
+    effectHandlers.set(key, handler)
+    return () => { effectHandlers.delete(key) }
+  }
+  async function applyEffects(cmd: HistoryCommand, side: 'before' | 'after'): Promise<void> {
+    const effects = side === 'before' ? [...(cmd.effects ?? [])].reverse() : cmd.effects ?? []
+    for (const effect of effects) {
+      const handler = effectHandlers.get(effect.key)
+      if (!handler) throw new Error('History metadata handler unavailable.')
+      await handler(effect[side])
+    }
+  }
   let nextId = 1
 
   const canUndo = computed(() => undoStack.value.length > 0 || pending.value !== null)
@@ -77,7 +91,7 @@ export const useHistoryStore = defineStore('studioHistory', () => {
     const byId = doc.tabs.find((t) => t.id === mutation.tabId && t.kind === 'document')
     if (byId) return byId
     if (!mutation.filePath) return undefined
-    return doc.documentTabs.find((t) => t.filePath && filePathsEqual(t.filePath, mutation.filePath))
+    return doc.documentTabs.find((t) => t.filePath && filePathsEqual(t.filePath, mutation.filePath!))
   }
 
   function restoreSelection(sel: HistorySelection | undefined): void {
@@ -123,6 +137,7 @@ export const useHistoryStore = defineStore('studioHistory', () => {
       labelParams: input.labelParams,
       coalesceKey: input.coalesceKey ?? null,
       timestamp: Date.now(),
+      effects: input.effects,
       mutations: input.mutations.map((m) => ({ ...m })),
       selectionBefore: input.selectionBefore,
       selectionAfter: input.selectionAfter
@@ -133,7 +148,7 @@ export const useHistoryStore = defineStore('studioHistory', () => {
     const last = undoStack.value[undoStack.value.length - 1]
     const now = Date.now()
     const canCoalesce = Boolean(
-      input.coalesceKey &&
+      !input.effects?.length && !last?.effects?.length && input.coalesceKey &&
         last &&
         last.coalesceKey === input.coalesceKey &&
         now - last.timestamp < COALESCE_MS &&
@@ -176,6 +191,7 @@ export const useHistoryStore = defineStore('studioHistory', () => {
     }
     pending.value = {
       ...input,
+      effects: input.effects,
       mutations: input.mutations.map((m) => ({ ...m })),
       timer: setTimeout(() => {
         flushPending()
@@ -189,7 +205,7 @@ export const useHistoryStore = defineStore('studioHistory', () => {
     const { timer, ...input } = current
     clearTimeout(timer)
     pending.value = null
-    if (input.mutations.every((m) => m.before === m.after)) return
+    if (input.mutations.every((m) => m.before === m.after) && !input.effects?.length) return
     pushOrCoalesce(input)
   }
 
@@ -203,7 +219,7 @@ export const useHistoryStore = defineStore('studioHistory', () => {
   function commit(input: HistoryCommitInput): void {
     if (applying.value) return
     const mutations = input.mutations.filter((m) => m.before !== m.after)
-    if (mutations.length === 0) return
+    if (mutations.length === 0 && !input.effects?.length) return
     const payload: HistoryCommitInput = {
       ...input,
       mutations,
@@ -216,6 +232,13 @@ export const useHistoryStore = defineStore('studioHistory', () => {
       return
     }
     scheduleCommit(payload)
+  }
+
+  function attachEffects(commandId: string, effects: HistoryEffect[]): boolean {
+    const command = undoStack.value[undoStack.value.length - 1]
+    if (pending.value || applying.value || !command || command.id !== commandId) return false
+    command.effects = [...(command.effects ?? []), ...effects]
+    return true
   }
 
   function applyDocument(tabId: string, after: string, options?: ApplyDocumentOptions): boolean {
@@ -237,7 +260,7 @@ export const useHistoryStore = defineStore('studioHistory', () => {
       mutations: [
         {
           tabId: tab.id,
-          filePath: tab.filePath,
+          filePath: tab.filePath ?? undefined,
           before,
           after
         }
@@ -247,12 +270,15 @@ export const useHistoryStore = defineStore('studioHistory', () => {
   }
 
   async function undo(): Promise<boolean> {
+    if (applying.value) return false
     await flushRegistered()
+    if (applying.value) return false
     const cmd = undoStack.value[undoStack.value.length - 1]
     if (!cmd) return false
-    undoStack.value.pop()
     applying.value = true
     try {
+      await applyEffects(cmd, 'before')
+      undoStack.value.pop()
       applyMutations(cmd.mutations, 'before')
       restoreSelection(cmd.selectionBefore)
       redoStack.value.push(cmd)
@@ -263,12 +289,15 @@ export const useHistoryStore = defineStore('studioHistory', () => {
   }
 
   async function redo(): Promise<boolean> {
+    if (applying.value) return false
     await flushRegistered()
+    if (applying.value) return false
     const cmd = redoStack.value[redoStack.value.length - 1]
     if (!cmd) return false
-    redoStack.value.pop()
     applying.value = true
     try {
+      await applyEffects(cmd, 'after')
+      redoStack.value.pop()
       applyMutations(cmd.mutations, 'after')
       restoreSelection(cmd.selectionAfter)
       undoStack.value.push(cmd)
@@ -298,9 +327,12 @@ export const useHistoryStore = defineStore('studioHistory', () => {
     undoStack,
     redoStack,
     registerFlusher,
+    registerEffect,
     commit,
+    attachEffects,
     applyDocument,
     flushPending,
+    flushRegistered,
     undo,
     redo,
     clear,

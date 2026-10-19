@@ -12,6 +12,7 @@ export interface EditorTab {
   title: string
   isDirty: boolean
   content: string
+  savedContent?: string
   linkedDocumentId?: string
 }
 
@@ -125,6 +126,7 @@ export function createDocumentTab(partial?: Partial<EditorTab>): EditorTab {
     title,
     isDirty: partial?.isDirty ?? false,
     content: partial?.content ?? defaultContentForKind(documentKind),
+    savedContent: partial?.savedContent ?? (partial?.isDirty ? undefined : partial?.content),
     linkedDocumentId: partial?.linkedDocumentId
   }
 }

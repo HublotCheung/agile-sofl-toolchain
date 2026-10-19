@@ -32,6 +32,9 @@
 | [24-Informal-Markdown与Hybrid生成器.md](./24-Informal-Markdown与Hybrid生成器.md) | Markdown Informal 模型、AI Agent、可插拔 Hybrid Generator |
 | [25-原子需求与精化度量机制.md](./25-原子需求与精化度量机制.md) | 原子需求、双线精化、二义性计数、审计步骤、CDFD/场景分工（科研/论文） |
 
+| [26-Trace关联与双向联动.md](./26-Trace关联与双向联动.md) | 关联恢复、双向建议、稳定身份、影响检测与后续演进设计 |
+| [27-Trace演示与组会讲解.md](./27-Trace演示与组会讲解.md) | 演示准备、逐步操作、组会讲稿与常见问答 |
+
 ## 快速验证
 
 ```bash

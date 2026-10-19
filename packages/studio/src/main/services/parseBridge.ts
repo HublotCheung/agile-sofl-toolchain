@@ -1,3 +1,4 @@
+import { registerTraceHandlers } from './traceService'
 import { acceptHybridWrite } from '../../shared/asflRepair'
 import { ipcMain } from 'electron'
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -172,6 +173,7 @@ function ensureLlmHybridGenerator(): void {
 }
 
 export function registerParseHandlers(): void {
+  registerTraceHandlers()
   ensureLlmHybridGenerator()
 
   ipcMain.handle(

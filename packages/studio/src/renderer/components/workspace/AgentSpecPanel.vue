@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useTraceabilityStore } from '../../stores/traceability'
 import { useI18n } from 'vue-i18n'
 import AgentPanel from './agent/AgentPanel.vue'
 import DockPanelChrome from './dock/DockPanelChrome.vue'
@@ -28,10 +29,15 @@ async function onApplyPatch(
 async function onApplyHybridPatch(
   patch: InformalPatchPayload
 ): Promise<{ ok: boolean; error?: string; applied?: boolean }> {
-  return applyHybridDocumentPatch(patch, {
+  const result = await applyHybridDocumentPatch(patch, {
     noTab: t('agent.noHybridTab'),
     applyFailed: t('agent.applyFailed')
   })
+  if (result.applied && patch.traceLinks?.length) {
+    const trace = useTraceabilityStore()
+    try { await trace.recordGenerated(patch.traceLinks) } catch (e) { trace.error = String(e) }
+  }
+  return result
 }
 </script>
 

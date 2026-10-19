@@ -11,7 +11,8 @@ export type WorkspaceSnapshot = {
     title: string
     isDirty: boolean
     content: string
-    documentKind?: 'asfl' | 'aspec'
+    savedContent?: string
+    documentKind?: 'asfl' | 'aspec' | 'guispec'
     linkedDocumentId?: string
   }>
 }
@@ -27,6 +28,7 @@ export function persistWorkspace(activeTabId: string, tabs: EditorTab[]): void {
         title: t.title,
         isDirty: t.isDirty,
         content: t.content,
+        savedContent: t.savedContent,
         documentKind: t.documentKind,
         linkedDocumentId: t.linkedDocumentId
       }))
@@ -57,6 +59,7 @@ export function restoreWorkspace(): { tabs: EditorTab[]; activeTabId: string } |
           title: d.title,
           isDirty: d.isDirty,
           content: d.content,
+          savedContent: d.savedContent,
           documentKind: d.documentKind,
           linkedDocumentId: d.linkedDocumentId
         })

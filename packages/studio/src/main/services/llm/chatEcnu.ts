@@ -113,6 +113,7 @@ export async function chatEcnu(options: {
   tools?: ChatTool[]
   temperature?: number
   json?: boolean
+  signal?: AbortSignal
 }): Promise<ChatCompletion> {
   const body: Record<string, unknown> = {
     messages: options.messages,
@@ -123,7 +124,7 @@ export async function chatEcnu(options: {
   if (options.tools?.length) body.tools = options.tools
   if (options.json) body.response_format = { type: 'json_object' }
 
-  const res = await postChat(body)
+  const res = await postChat(body, options.signal)
   const json = (await res.json()) as {
     usage?: { prompt_tokens?: number; completion_tokens?: number }
     model?: string

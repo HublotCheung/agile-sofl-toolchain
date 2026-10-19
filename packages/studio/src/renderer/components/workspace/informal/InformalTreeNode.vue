@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TraceBadge from '../TraceBadge.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { nestedNodes } from '../../../composables/useInformalSpec'
@@ -146,6 +147,7 @@ function onDragOver(event: DragEvent): void {
             {{ node.description }}
           </span>
         </span>
+        <TraceBadge side="informal" :locator="node.id" />
         <button
           type="button"
           class="shrink-0 rounded px-1 text-[12px] font-medium text-accent opacity-0 hover:bg-accent/10 group-hover:opacity-100"

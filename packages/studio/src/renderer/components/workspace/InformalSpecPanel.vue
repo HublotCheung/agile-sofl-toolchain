@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import TraceBadge from './TraceBadge.vue'
+import TraceWorkbench from './TraceWorkbench.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DocumentView from './informal/DocumentView.vue'
@@ -175,6 +177,7 @@ function onViewMode(id: string): void {
     <DockPanelChrome panel="informal" :title="title" :dirty="dirty">
       <template #actions>
         <div class="flex min-w-0 items-center gap-2">
+          <TraceBadge side="informal" />
           <SegmentedSwitch
             class="min-w-0 shrink"
             :model-value="workspace.informalViewMode"
@@ -191,6 +194,7 @@ function onViewMode(id: string): void {
         </div>
       </template>
     </DockPanelChrome>
+    <TraceWorkbench side="informal" />
     <div class="relative z-0 min-h-0 flex-1 overflow-hidden">
       <DocumentView
         v-if="workspace.informalViewMode === 'document'"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TraceBadge from '../../../workspace/TraceBadge.vue'
 import { useI18n } from 'vue-i18n'
 import type { VisualModuleProcess } from '../../../../preload/index'
 import EmptyState from '../ui/EmptyState.vue'
@@ -7,6 +8,7 @@ import VisualEntityMenu from './VisualEntityMenu.vue'
 
 defineProps<{
   processes: VisualModuleProcess[]
+  moduleName?: string
   disabled?: boolean
   editDisabled?: boolean
 }>()
@@ -48,6 +50,7 @@ function portSummary(groups?: Array<{ names: string; type: string }>): string {
           >
             {{ t('visual.init.badge') }}
           </span>
+          <TraceBadge v-if="moduleName" side="hybrid" :locator="`proc:${moduleName}.${p.name}`" />
           <VisualEntityMenu
             :disabled="disabled"
             :edit-disabled="editDisabled"

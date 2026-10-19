@@ -1,3 +1,4 @@
+import { useTraceabilityStore } from '../stores/traceability'
 import { ref, watch, computed, onUnmounted, shallowRef, type ComputedRef } from 'vue'
 import type {
   PatchDeclarationPayload,
@@ -198,7 +199,12 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
   async function patchProcess(payload: Omit<PatchProcessPayload, 'source'>): Promise<void> {
     await applySourcePatch(async (source) => {
       if (!window.studio?.patchProcess) return source
-      return window.studio.patchProcess({ ...payload, source })
+      const next=await window.studio.patchProcess({ ...payload, source })
+      if(next!==source&&payload.action==='rename'&&payload.newName){
+        const prefix=payload.kind==='function'?'fn':'proc',moduleName=payload.moduleName.replace(/^SYSTEM_/,'')
+        useTraceabilityStore().hintRename('hybrid',`${prefix}:${moduleName}.${payload.name}`,payload.newName,`${prefix}:${moduleName}.${payload.newName}`)
+      }
+      return next
     })
   }
 
@@ -318,7 +324,14 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
     await applySourcePatch(
       async (source) => {
         if (!window.studio?.patchModule) return source
-        return window.studio.patchModule({ ...payload, source })
+        const next=await window.studio.patchModule({ ...payload, source })
+        if(next!==source&&payload.action==='rename'&&payload.newName){
+          const trace=useTraceabilityStore(),from=payload.moduleName.replace(/^SYSTEM_/,''),to=payload.newName.replace(/^SYSTEM_/,'')
+          for(const e of trace.present.filter(e=>e.side==='hybrid'&&e.locator.includes(':'+from+'.'))){
+            trace.hintRename('hybrid',e.locator,e.kind==='invariant'?e.title.replace(from+' inv ',to+' inv '):e.title,e.locator.replace(':'+from+'.',':'+to+'.'))
+          }
+        }
+        return next
       },
       {
         kind,

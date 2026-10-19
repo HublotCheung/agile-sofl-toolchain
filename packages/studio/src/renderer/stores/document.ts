@@ -163,6 +163,7 @@ export const useDocumentStore = defineStore('document', () => {
       if (!existing.isDirty) {
         const contentChanged = existing.content !== content
         existing.content = content
+        existing.savedContent = content
         existing.title = title
         existing.uri = pathToFileUri(filePath)
         if (contentChanged) bumpContentEpoch(existing.id)
@@ -192,6 +193,7 @@ export const useDocumentStore = defineStore('document', () => {
   function markSaved(id: string, filePath: string, title: string): void {
     const tab = tabs.value.find((t) => t.id === id)
     if (!tab || tab.kind !== 'document') return
+    tab.savedContent = tab.content
     tab.filePath = filePath
     tab.title = title
     tab.isDirty = false

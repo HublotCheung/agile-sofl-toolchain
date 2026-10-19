@@ -1,4 +1,4 @@
-import type { StudioApi } from '../../preload/index'
+import type { StudioApi } from '../preload/index'
 
 export {}
 

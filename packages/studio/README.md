@@ -46,3 +46,12 @@ npm run dev --workspace @agile-sofl/studio
 | Renderer | Vue 3 + Pinia + Tailwind + Monaco + monaco-languageclient + `@agile-sofl/editor-api` |
 
 See [docs/12-Electron编辑器集成.md](../../docs/12-Electron编辑器集成.md), [docs/14-Studio-UI设计规约.md](../../docs/14-Studio-UI设计规约.md), and [docs/15-Studio可视化编辑器.md](../../docs/15-Studio可视化编辑器.md).
+
+
+## Links and bidirectional updates
+
+Open the **Links / 关联** entry in either Informal or Hybrid. Add manual links or find AI candidates, inspect changes, and preview updates in either direction before applying. Shared declarations show their affected processes; edits and link metadata share the global undo stack. Saving a file does not acknowledge an unchecked change.
+
+Manual links, navigation, and local change detection work without an LLM. AI recovery and update suggestions use the configured Studio model. The project-wide graph is stored in `.agile-sofl/trace/workspace-v3.json`; keep the trace directory with the project for restart recovery. Links span specification files and survive unambiguous moves. The panel includes reviewed split/merge, exact evidence, constraint inspection, an optional link map, bulk review, snapshot comparison and interrupted-update recovery. Document headings and code lenses provide direct navigation.
+
+See [Trace 关联与双向联动](../../docs/26-Trace关联与双向联动.md) for current behavior, validation, and the design for multi-file tracing, split/merge, evidence, evaluation, and collaboration.

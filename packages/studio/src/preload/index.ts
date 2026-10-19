@@ -1,3 +1,6 @@
+import type { TraceJournal } from '../main/services/traceTransactions'
+import type { TraceMergeConflict, TraceRebindPlan, TraceStructurePreview } from '../shared/traceAdvanced'
+import type { TracePair, TraceDocument, TraceSnapshot, TraceProposal, TraceLink, TraceSide, TraceIdentityHint, TracePrepared, TraceEvidence, CoverageAssessment, TraceSource } from '../shared/traceability'
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   IndexedProject,
@@ -24,6 +27,23 @@ export type FileOpenResult = {
 }
 
 const studio = {
+  traceStructurePreview: (pair:TracePair,ids:string[],parts:Array<{title:string;description:string}>)=>ipcRenderer.invoke('studio:trace-structure-preview',pair,ids,parts) as Promise<TraceStructurePreview>,
+  traceStructurePrepare: (pair:TracePair,id:string,plan:TraceRebindPlan)=>ipcRenderer.invoke('studio:trace-structure-prepare',pair,id,plan) as Promise<TraceStructurePreview>,
+  traceRead: (pair: TracePair, hints?: TraceIdentityHint[]) => ipcRenderer.invoke('studio:trace-read', pair, hints) as Promise<TraceSnapshot>,
+  traceSave: (pair: TracePair, document: TraceDocument, expected: number) => ipcRenderer.invoke('studio:trace-save', pair, document, expected) as Promise<TraceDocument>,
+  traceRecover: (pair: TracePair, scope: string[], locale: string, options?:{provider?:string;mode?:'complete'|'focused';refresh?:boolean}) => ipcRenderer.invoke('studio:trace-recover', pair, scope, locale, options) as Promise<{links:TraceLink[];informal:string;hybrid:string;revision:number;documents?:TraceSource[];cached?:number;estimatedTokens?:number}>,
+  traceProviders: ()=>ipcRenderer.invoke('studio:trace-providers') as Promise<Array<{id:string;name:string}>>,
+  traceAssess: (pair:TracePair,id:string,locale:string,options?:{provider?:string})=>ipcRenderer.invoke('studio:trace-assess',pair,id,locale,options) as Promise<{revision:number;evidence:TraceEvidence[];assessment:CoverageAssessment}>,
+  traceMerge: (pair:TracePair,base:TraceDocument,remote:TraceDocument,choices:Record<string,'local'|'remote'>)=>ipcRenderer.invoke('studio:trace-merge',pair,base,remote,choices) as Promise<{document:TraceDocument;conflicts:TraceMergeConflict[]}>,
+  traceStage: (pair:TracePair,document:TraceDocument,changes:NonNullable<TracePrepared['changes']>)=>ipcRenderer.invoke('studio:trace-stage',pair,document,changes) as Promise<string>,
+  traceFinish: (pair:TracePair,id:string,state:'buffers-applied'|'discarded')=>ipcRenderer.invoke('studio:trace-finish',pair,id,state) as Promise<void>,
+  traceTransactions: (pair:TracePair)=>ipcRenderer.invoke('studio:trace-transactions',pair) as Promise<Array<Omit<TraceJournal,'before'|'after'>>>,
+  traceRestore: (pair:TracePair,id:string,choice:'restore'|'discard')=>ipcRenderer.invoke('studio:trace-restore',pair,id,choice) as Promise<TraceJournal>,
+  traceSaveFiles: (pair:TracePair,changes:NonNullable<TracePrepared['changes']>,revision:number)=>ipcRenderer.invoke('studio:trace-save-files',pair,changes,revision) as Promise<void>,
+  traceOnProgress: (cb:(progress:{jobId:string;root:string;done:number;total:number;candidates:number;cached:number;estimatedTokens:number;status:string})=>void)=>{const handler=(_event:unknown,data:Parameters<typeof cb>[0])=>cb(data);ipcRenderer.on('studio:trace-progress',handler);return()=>ipcRenderer.removeListener('studio:trace-progress',handler)},
+  traceSuggest: (pair: TracePair, linkId: string, direction: TraceSide, locale: string, options?:{provider?:string}) => ipcRenderer.invoke('studio:trace-suggest', pair, linkId, direction, locale, options) as Promise<TraceProposal>,
+  tracePrepare: (pair: TracePair, proposal: TraceProposal, selected: string[]) => ipcRenderer.invoke('studio:trace-prepare', pair, proposal, selected) as Promise<TracePrepared>,
+  traceCancel: () => ipcRenderer.invoke('studio:trace-cancel') as Promise<void>,
   minimize: () => ipcRenderer.invoke('studio:window-minimize'),
   maximize: () => ipcRenderer.invoke('studio:window-maximize') as Promise<boolean>,
   close: () => ipcRenderer.invoke('studio:window-close'),
@@ -44,9 +64,9 @@ const studio = {
   },
   confirmClose: () => ipcRenderer.send('studio:confirm-close'),
 
-  fileOpenDialog: (kind?: 'asfl' | 'aspec' | 'guispec' | 'any') =>
+  fileOpenDialog: (kind?: 'asfl' | 'aspec' | 'guispec' | 'any' | 'json') =>
     ipcRenderer.invoke('studio:file-open-dialog', kind) as Promise<FileOpenResult | null>,
-  fileSaveDialog: (defaultName?: string, kind?: 'asfl' | 'aspec' | 'guispec') =>
+  fileSaveDialog: (defaultName?: string, kind?: 'asfl' | 'aspec' | 'guispec' | 'json') =>
     ipcRenderer.invoke('studio:file-save-dialog', defaultName, kind) as Promise<string | null>,
   fileRead: (path: string) => ipcRenderer.invoke('studio:file-read', path) as Promise<FileOpenResult>,
   fileWrite: (path: string, content: string) =>
@@ -805,6 +825,7 @@ export type InformalParsePayload = {
 }
 
 export type InformalPatchPayload = {
+  traceLinks?: Array<{ sourceId: string; targetId: string; relation?: string }>
   target?: 'informal' | 'hybrid' | 'gui'
   mode?: 'crud' | 'source'
   explanation?: string

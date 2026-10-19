@@ -10,7 +10,10 @@ export type HistoryMutation = {
   after: string
 }
 
+export type HistoryEffect = { key: string; before: string; after: string }
+
 export type HistoryCommitInput = {
+  effects?: HistoryEffect[]
   kind: string
   mutations: HistoryMutation[]
   label?: string
@@ -22,6 +25,7 @@ export type HistoryCommitInput = {
 }
 
 export type HistoryCommand = {
+  effects?: HistoryEffect[]
   id: string
   kind: string
   label?: string

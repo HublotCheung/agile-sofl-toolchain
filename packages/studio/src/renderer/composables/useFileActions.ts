@@ -30,14 +30,6 @@ export function useFileActions() {
     if (tab.documentKind === 'asfl' && path) {
       if (workspace.hasWorkspace) await workspace.markHybridSaved(path)
     }
-    if (tab.documentKind === 'aspec' && path && window.studio?.updateTraceContentHash) {
-      const tracePath = path.replace(/\.aspec$/i, '.aspec.trace.json')
-      try {
-        await window.studio.updateTraceContentHash(tracePath, tab.content)
-      } catch {
-        /* trace file may not exist yet */
-      }
-    }
     const root = workspace.activeProject?.rootPath
     if (root) void refreshGitFor(root)
     return true

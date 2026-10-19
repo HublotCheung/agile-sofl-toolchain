@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+import { useTraceabilityStore } from '../../stores/traceability'
+import { linkState } from '../../../shared/traceability'
+import { filePathsEqual } from '../../stores/tabUtils'
 import { ref, watch, onMounted, onUnmounted, shallowRef, computed, nextTick } from 'vue'
 import type * as Monaco from 'monaco-editor'
 import { monaco, initMonacoBase } from '../../monaco/setup'
@@ -43,6 +47,31 @@ const lsp = useLspStore()
 const lspDiagnostics = useLspDiagnosticsStore()
 const editorUi = useEditorUiStore()
 const settings = useSettingsStore()
+const trace=useTraceabilityStore(),{t,locale}=useI18n()
+const traceSubscriptions:Monaco.IDisposable[]=[]
+let traceLensEvent:Monaco.Emitter<void>|null=null
+function traceEntities(){const tab=activeDocumentTab.value;return trace.present.filter(e=>e.start>=0&&e.documentPath&&tab?.filePath&&filePathsEqual(trace.absolutePath(e.documentPath),tab.filePath)&&e.kind!=='scenario')}
+function installTraceLenses(){
+  trace.start();traceLensEvent=new monaco.Emitter<void>()
+  const command='studio.trace.open.'+crypto.randomUUID()
+  traceSubscriptions.push(monaco.editor.registerCommand(command,(_accessor,id:string)=>{const e=trace.present.find(e=>e.id===id);if(e)trace.open(e.side,e.locator)}))
+  for(const language of ['agile-sofl','agile-aspec'])traceSubscriptions.push(monaco.languages.registerCodeLensProvider(language,{
+    onDidChange:traceLensEvent.event,
+    provideCodeLenses(model){
+      if(model!==editor.value?.getModel())return {lenses:[],dispose(){}}
+      return {lenses:traceEntities().map(e=>{
+        const p=model.getPositionAt(e.start),links=trace.document.links.filter(l=>l.review!=='rejected'&&[l.source,l.target].includes(e.id)),pending=links.some(l=>l.review==='suggested'||linkState(trace.document,l)!=='current')
+        return {range:new monaco.Range(p.lineNumber,1,p.lineNumber,1),command:{id:command,title:t('trace.links')+' '+links.length+(pending?' •':''),arguments:[e.id]}}
+      }),dispose(){}}
+    }
+  }))
+  traceSubscriptions.push(editor.value!.onDidChangeCursorPosition(event=>{
+    if(!trace.followSelection)return
+    const offset=editor.value!.getModel()!.getOffsetAt(event.position)
+    const entity=traceEntities().filter(e=>e.start<=offset&&offset<=e.end).sort((a,b)=>(a.end-a.start)-(b.end-b.start))[0]
+    if(entity)trace.focusedId=entity.id
+  }))
+}
 let resizeObserver: ResizeObserver | null = null
 
 const activeDocumentTab = computed(() => {
@@ -52,6 +81,8 @@ const activeDocumentTab = computed(() => {
   }
   return doc.activeTab?.kind === 'document' ? doc.activeTab : null
 })
+
+watch(()=>[trace.document.revision,locale.value,activeDocumentTab.value?.id],()=>traceLensEvent?.fire())
 
 function runCommand(cmd: string): void {
   const ed = editor.value
@@ -404,6 +435,7 @@ async function bootMonaco(): Promise<void> {
     editor.value.onDidChangeModelContent(onContentChange)
     editor.value.onDidBlurEditorText(() => flushEditorToDocument())
     syncModel()
+    installTraceLenses()
     resizeObserver = new ResizeObserver(() => relayout())
     resizeObserver.observe(container.value.parentElement ?? container.value)
     void nextTick(relayout)
@@ -468,6 +500,8 @@ onUnmounted(() => {
   if (!history.applying) flushEditorToDocument()
   resizeObserver?.disconnect()
   resizeObserver = null
+  traceSubscriptions.forEach(s=>s.dispose())
+  traceLensEvent?.dispose()
   markerSub?.dispose()
   const ed = editor.value
   editor.value = null

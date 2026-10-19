@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useTraceabilityStore } from '../../../stores/traceability'
+import { linkState } from '../../../../shared/traceability'
+import { filePathsEqual } from '../../../stores/tabUtils'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Vditor from 'vditor'
@@ -20,6 +23,24 @@ const doc = useDocumentStore()
 const history = useHistoryStore()
 const app = useAppStore()
 const workspace = useWorkspaceStore()
+const trace=useTraceabilityStore()
+const traceAnchors=ref<Array<{id:string;locator:string;top:number;count:number;pending:boolean}>>([])
+let traceFrame=0
+function syncTraceAnchors(){
+  const shell=host.value?.parentElement,current=tab.value
+  if(!shell||!current?.filePath)return
+  const rect=shell.getBoundingClientRect(),used=new Set<string>(),anchors:typeof traceAnchors.value=[]
+  for(const heading of headingElements()){
+    const entity=trace.present.find(e=>e.side==='informal'&&!used.has(e.id)&&e.title===(heading.textContent??'').trim()&&e.documentPath&&filePathsEqual(trace.absolutePath(e.documentPath),current.filePath!))
+    if(!entity)continue;used.add(entity.id)
+    const position=heading.getBoundingClientRect(),top=position.top-rect.top
+    if(top<28||top>rect.height-20)continue
+    const links=trace.document.links.filter(l=>l.review!=='rejected'&&l.source===entity.id)
+    anchors.push({id:entity.id,locator:entity.locator,top,count:links.length,pending:links.some(l=>l.review==='suggested'||linkState(trace.document,l)!=='current')})
+  }
+  traceAnchors.value=anchors
+}
+function scheduleTraceAnchors(){if(traceFrame)cancelAnimationFrame(traceFrame);traceFrame=requestAnimationFrame(syncTraceAnchors)}
 const host = ref<HTMLElement | null>(null)
 const isDark = ref(typeof document !== 'undefined' && document.documentElement.classList.contains('dark'))
 let editor: Vditor | null = null
@@ -37,6 +58,8 @@ const tab = computed(() => {
   const found = doc.tabs.find((t) => t.id === props.tabId)
   return found?.kind === 'document' ? found : null
 })
+
+watch(()=>[trace.document.revision,tab.value?.content],()=>void nextTick(scheduleTraceAnchors))
 
 function vditorCdn(): string {
   return new URL('vditor', window.location.href).href.replace(/\/?$/, '')
@@ -209,6 +232,12 @@ watch(
 )
 
 onMounted(() => {
+  trace.start()
+  host.value?.addEventListener('scroll',scheduleTraceAnchors,true)
+  const traceObserver=new MutationObserver(scheduleTraceAnchors)
+  if(host.value)traceObserver.observe(host.value,{subtree:true,childList:true,characterData:true})
+  const traceResize=new ResizeObserver(scheduleTraceAnchors)
+  if(host.value)traceResize.observe(host.value)
   syncTheme()
   const observer = new MutationObserver(syncTheme)
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
@@ -224,6 +253,9 @@ onMounted(() => {
     if (idleId) window.cancelIdleCallback(idleId)
     if (timer) window.clearTimeout(timer)
     observer.disconnect()
+    traceObserver.disconnect();traceResize.disconnect()
+    host.value?.removeEventListener('scroll',scheduleTraceAnchors,true)
+    if(traceFrame)cancelAnimationFrame(traceFrame)
     editor?.destroy()
     editor = null
   })
@@ -233,8 +265,11 @@ defineExpose({ revealSpan })
 </script>
 
 <template>
-  <div v-if="tabId && tab" class="informal-md-shell h-full min-h-0 min-w-0">
+  <div v-if="tabId && tab" class="informal-md-shell relative h-full min-h-0 min-w-0">
     <div ref="host" class="informal-vditor h-full min-h-0" />
+    <div class="pointer-events-none absolute inset-0 z-10" :aria-label="t('trace.links')">
+      <button v-for="a in traceAnchors" :key="a.id" type="button" class="pointer-events-auto absolute right-2 rounded border border-border-subtle bg-surface-raised px-1.5 py-0.5 text-[10px] shadow-sm" :class="a.pending?'text-semantic-warning':'text-accent'" :style="{top:a.top+'px'}" :title="t('trace.openHint')" @mousedown.prevent @click="trace.open('informal',a.locator)">{{ t('trace.links') }} {{ a.count }}{{ a.pending?' •':'' }}</button>
+    </div>
   </div>
   <p v-else class="p-4 text-xs text-content-muted">{{ $t('workspace.noInformal') }}</p>
 </template>

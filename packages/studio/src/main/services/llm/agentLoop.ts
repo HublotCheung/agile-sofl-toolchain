@@ -981,6 +981,12 @@ export async function runAgentTurn(
                     ? (args.operations as Array<Record<string, unknown>>)
                     : []
                 }
+          if (target === 'hybrid' && Array.isArray(args.traceLinks)) {
+            patch.traceLinks = args.traceLinks.filter((l: unknown): l is { sourceId: string; targetId: string; relation?: string } => {
+              const item = l as Record<string, unknown>
+              return !!item && typeof item.sourceId === 'string' && typeof item.targetId === 'string'
+            })
+          }
           const allowed =
             target === 'informal'
               ? permissions.informal.write

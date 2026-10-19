@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import TraceBadge from './TraceBadge.vue'
+import TraceWorkbench from './TraceWorkbench.vue'
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MonacoEditor from '../editor/MonacoEditor.vue'
@@ -183,7 +185,8 @@ function onRevealSpan(span: SerializableSpan): void {
           <DockPanelChrome panel="hybrid" :title="title" :dirty="dirty">
             <template #actions>
               <div class="ml-auto flex min-w-0 shrink-0 items-center">
-                <SegmentedSwitch
+                <TraceBadge side="hybrid" />
+            <SegmentedSwitch
                   class="min-w-0 shrink"
                   :model-value="workspace.hybridMode"
                   :options="hybridViewOptions"
@@ -192,6 +195,7 @@ function onRevealSpan(span: SerializableSpan): void {
               </div>
             </template>
           </DockPanelChrome>
+      <TraceWorkbench side="hybrid" />
           <div class="relative min-h-0 flex-1 overflow-hidden">
             <div
               class="absolute inset-0"
@@ -231,6 +235,7 @@ function onRevealSpan(span: SerializableSpan): void {
       <DockPanelChrome panel="hybrid" :title="title" :dirty="dirty">
         <template #actions>
           <div class="ml-auto flex min-w-0 shrink-0 items-center">
+            <TraceBadge side="hybrid" />
             <SegmentedSwitch
               class="min-w-0 shrink"
               :model-value="workspace.hybridMode"
@@ -240,6 +245,7 @@ function onRevealSpan(span: SerializableSpan): void {
           </div>
         </template>
       </DockPanelChrome>
+      <TraceWorkbench side="hybrid" />
       <div class="relative min-h-0 flex-1 overflow-hidden">
         <div
           class="absolute inset-0"

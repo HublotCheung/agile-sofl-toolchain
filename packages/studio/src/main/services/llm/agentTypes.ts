@@ -19,6 +19,7 @@ export type ReviewIssue = {
 }
 
 export type InformalPatchPayload = {
+  traceLinks?: Array<{ sourceId: string; targetId: string; relation?: string }>
   target?: 'informal' | 'hybrid' | 'gui'
   mode?: 'crud' | 'source'
   explanation?: string
