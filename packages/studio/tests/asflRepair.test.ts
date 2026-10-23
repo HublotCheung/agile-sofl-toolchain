@@ -41,6 +41,15 @@ describe('repairAsflSurface', () => {
     const repaired = repairAsflSurface('^ orphan')
     expect(repaired.unresolved).toMatch(/\^/)
   })
+
+  it('rewrites iff and VDM-style forall in invariants', () => {
+    const repaired = repairAsflSurface(
+      'forall u: UserId, deleted_flags(u) = true iff users(u) = deleted'
+    )
+    expect(repaired.text).toContain('forall[u: UserId] |')
+    expect(repaired.text).toContain('implies')
+    expect(repaired.text).not.toMatch(/\biff\b/)
+  })
 })
 
 describe('acceptHybridWrite', () => {

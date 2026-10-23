@@ -1,3 +1,4 @@
+import { compactDiagnosticPayload } from './diagnosticPayload'
 import { informalEntities } from '../traceEngine'
 import { chatEcnuStream, isChatAborted, type ChatMessage, type ChatStreamDelta } from './chatEcnu'
 import { getEcnuConfig } from './profiles'
@@ -263,7 +264,8 @@ Do not invent YAML frontmatter or document-level metadata.`
   const hybridGuide = permissions.hybrid.write
     ? `For propose_hybrid_changes, operate on Hybrid inventory ids with CRUD only:
 - add: kind (module|type|var|const|inv|process|function|scenario|gui-screen) + parentId (mod:Module or proc:Module.Name) + name. Bare ids like proc:Login or Chinese titles are resolved when possible, but prefer inventory ids. Types/vars/invs use text. Processes use signature + FSF (final grammar): FSF : T1 && D1 || T2 && D2 || … || others && Dn (Ti = test condition over inputs and ~x initial values, never outputs; Di = defining condition that constrains outputs / written ext vars). Inside Ti/Di use and, or, not; && and || only separate scenarios. If ports are unknown, signature is () — do not invent dummy (x: nat) ok: nat.
-- update / remove: id of existing entity (mod:, proc:, type:, var:, inv:, scn:, gui:). Removing a parent module rewrites child headers (drops / Parent).
+- update / remove: id of existing entity (mod:, proc:, type:, var:, inv:, scn:, gui:). Invariant ids are inv:Module.0, inv:Module.1, … (index from inventory). Removing a parent module rewrites child headers (drops / Parent).
+- inv text: legal ASFL only (forall[u: T] | …; implies/and/or/not). Never iff or VDM "forall u: T," comma form.
 - replace-process-body: id of proc:, set fsf to the full FSF text "FSF : T1 && D1 || T2 && D2 || … || others && Dn" (structured natural language is allowed inside Ti/Di). Use pre/post only for legacy documents that already use them.
 FORBIDDEN: replace-document, asflText, dumping several modules as one string, "-- comments" as source.
 Add SYSTEM_ first, then one semantic module at a time with parentId pointing at the system module, then its types/vars/invs/processes as separate operations. Prefer updating an existing id over adding a duplicate.
@@ -1147,9 +1149,15 @@ export async function runAgentTurn(
               : compactHybrid(ctx.hybridAsfl)
           // Parser diagnostics are always fed back (also in condition B2). L1/L2 semantic FSF
           // diagnostics are added only when the experiment condition enables them (not in B2).
-          const diagnostics = permissions.hybrid.read
+          const fullDiagnostics = permissions.hybrid.read
             ? await hybridDiagnosticsWithSemantic(ctx.hybridAsfl, getExperimentConfig(projectRoot))
             : { count: 0, errors: 0, items: [] }
+          const diagnostics = compactDiagnosticPayload(fullDiagnostics)
+          if (diagnostics.truncated) {
+            logTelemetry(projectRoot, getExperimentConfig(projectRoot), session.id, {
+              event: 'full_read_diagnostics', toolCallId: call.id, diagnostics: fullDiagnostics
+            })
+          }
           session.messages.push({
             id: call.id,
             role: 'tool',

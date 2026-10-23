@@ -2,6 +2,7 @@ import { parse, printProgram, textOf } from '@agile-sofl/parser'
 import type { ProgramNode } from '@agile-sofl/parser'
 import type { Span } from '@agile-sofl/parser'
 import { findProcess } from './documentModel.js'
+import { namesEqual } from './hybridIds.js'
 import type { FsfScenarioDto } from './fsfModel.js'
 
 function replaceSpan(source: string, span: { start: number; end: number }, replacement: string): string {
@@ -253,12 +254,16 @@ export function getInformalSpans(source: string, ast: ProgramNode) {
  * Replace (or insert) the whole `FSF :` clause of a process with final-grammar FSF text
  * `T1 && D1 || … || others && Dn`. Existing pre/post clauses are left untouched.
  */
-export function patchProcessFsfText(source: string, processName: string, fsfText: string): string {
+export function patchProcessFsfText(source: string, processName: string, fsfText: string, moduleName?: string): string {
   const { ast } = parse(source)
   if (!ast || ast.type !== 'program') return source
-  const proc = findProcess(ast, processName)
+  const proc = moduleName
+    ? ast.modules.find((m) => namesEqual(m.name, moduleName))?.processes.find((p) => p.name === processName)
+    : findProcess(ast, processName)
   if (!proc) return source
-  const body = fsfText.trim().replace(/^FSF\s*:\s*/i, '')
+  let body = fsfText.trim().replace(/^FSF\s*:\s*/i, '')
+  const labelled = /^([^:\n]+)\s*:\s*([\s\S]*)$/.exec(body)
+  if (labelled?.[1]?.trim() === processName) body = labelled[2]!.trim()
   const block = `FSF :\n    ${body}`
   const fsf = proc.body?.fsf
   if (fsf) return replaceSpan(source, fsfPatchSpan(source, fsf), block)

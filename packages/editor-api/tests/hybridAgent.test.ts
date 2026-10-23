@@ -242,6 +242,23 @@ end_module
     expect(formatHybridDiagnostics(WITH_TYPE)).toBe('(no hybrid diagnostics)')
   })
 
+  it('lists and updates invariants by zero-based inv:Module.index id', () => {
+    const source = `module SYSTEM_M;
+var x: nat;
+inv
+  x > 0;
+  x < 10;
+end_module`
+    const inventory = formatHybridInventory(source)
+    expect(inventory).toContain('inv:M.0')
+    expect(inventory).toContain('inv:M.1')
+    const { content, error } = applyHybridPatch(source, {
+      operations: [{ op: 'update', id: 'inv:M.0', text: 'x >= 1' }]
+    })
+    expect(error).toBeUndefined()
+    expect(content).toContain('x >= 1')
+  })
+
   it('adds modules to an empty document without inventing SYSTEM_', () => {
     const { content, error } = applyHybridPatch('', {
       operations: [

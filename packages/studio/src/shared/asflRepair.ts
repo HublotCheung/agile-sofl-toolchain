@@ -129,9 +129,31 @@ function errorMultiset(source: string): Map<string, number> {
   return map
 }
 
+function repairQuantifierAndIff(text: string): { text: string; notes: string[] } {
+  const notes: string[] = []
+  let out = text
+  const forall = out.replace(
+    /\bforall\s+([A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]*)\s*:\s*([^,\|\n;]+)\s*,\s*/g,
+    'forall[$1: $2] | '
+  )
+  if (forall !== out) {
+    out = forall
+    notes.push('rewrote forall u: T, to forall[u: T] |')
+  }
+  const iff = out.replace(/([^;\n]+?)\s+iff\s+([^;\n]+)/g, '($1 implies $2) and ($2 implies $1)')
+  if (iff !== out) {
+    out = iff
+    notes.push('rewrote iff to (A implies B) and (B implies A)')
+  }
+  return { text: out, notes }
+}
+
 function repairCode(code: string): AsflRepair {
   const notes: string[] = []
   let text = code
+  const quant = repairQuantifierAndIff(text)
+  text = quant.text
+  notes.push(...quant.notes)
   if (text.includes('!=')) {
     text = text.replace(/!=/g, '<>')
     notes.push('rewrote != to <>')

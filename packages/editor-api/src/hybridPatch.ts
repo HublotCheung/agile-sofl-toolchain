@@ -428,6 +428,7 @@ function resolveEntity(source: string, id: string): ResolvedEntity | null {
 }
 
 function resolveFuzzy(model: VisualModelResult, parsed: ParsedHybridId): ResolvedEntity | null {
+  if (!parsed.bare && parsed.kind !== 'mod' && !findVisualModule(model, parsed.moduleName)) return null
   const query = parsed.entityName || parsed.moduleName
   if (parsed.kind === 'mod' || parsed.bare) {
     const mod = model.modules.find(
@@ -473,8 +474,9 @@ function resolveFuzzy(model: VisualModelResult, parsed: ParsedHybridId): Resolve
       }
       if (kind === 'inv') {
         const names = invIdNames(mod.invariants.map((i) => i.text))
-        const idx = names.findIndex((n, i) => labelsMatch(n, query) || labelsMatch(mod.invariants[i]?.text, query))
-        if (idx >= 0) {
+        let idx = /^\d+$/.test(query) ? parseInt(query, 10) : -1
+        if (idx < 0) idx = names.findIndex((n, i) => labelsMatch(n, query) || labelsMatch(mod.invariants[i]?.text, query))
+        if (idx >= 0 && idx < mod.invariants.length) {
           const inv = mod.invariants[idx]!
           return { kind: 'inv', moduleName: mod.name, name: names[idx]!, text: inv.text, span: inv.span }
         }
@@ -537,7 +539,8 @@ function resolveParsed(model: VisualModelResult, parsed: ParsedHybridId): Resolv
   if (!mod || !parsed.entityName) return null
 
   if (parsed.kind === 'proc') {
-    const proc = mod.processes.find((p) => matchName(p.name, parsed.entityName!))
+    const proc = mod.processes.find((p) => namesEqual(p.name, parsed.entityName!))
+      ?? mod.processes.find((p) => matchName(p.name, parsed.entityName!))
     return proc ? { kind: 'process', moduleName: mod.name, name: proc.name } : null
   }
   if (parsed.kind === 'fn') {
@@ -558,8 +561,10 @@ function resolveParsed(model: VisualModelResult, parsed: ParsedHybridId): Resolv
   }
   if (parsed.kind === 'inv') {
     const names = invIdNames(mod.invariants.map((i) => i.text))
-    const idx = names.findIndex((n) => matchName(n, parsed.entityName!))
-    if (idx < 0) return null
+    const entity = parsed.entityName!
+    let idx = /^\d+$/.test(entity) ? parseInt(entity, 10) : -1
+    if (idx < 0) idx = names.findIndex((n) => matchName(n, entity))
+    if (idx < 0 || idx >= mod.invariants.length) return null
     const inv = mod.invariants[idx]!
     return {
       kind: 'inv',
@@ -1027,6 +1032,11 @@ function applyReplaceBody(
   if (op.pre === undefined && op.post === undefined && op.fsf === undefined) {
     return err('replace-process-body requires fsf, pre or post')
   }
+  const requested = parseHybridId(op.id)
+  if (requested && !requested.bare && !findVisualModule(buildVisualModelTolerant(source), requested.moduleName)) {
+    return err(`Unknown module in qualified process target: ${op.id}`)
+  }
+  const previouslyParseable = !parse(source).diagnostics.some((d) => d.severity === 'error')
   let resolved = resolveEntity(source, op.id)
   if (!resolved || resolved.kind !== 'process') {
     const created = materializeFromId(source, op.id, { pre: op.pre, post: op.post })
@@ -1036,11 +1046,16 @@ function applyReplaceBody(
   }
   if (!resolved) return unknownId(op.id)
   if (resolved.kind !== 'process') return err(`replace-process-body expects a process id, got ${op.id}`)
+  if (previouslyParseable && op.fsf !== undefined) {
+    const candidate = patchProcessFsfText(source, resolved.name, op.fsf, resolved.moduleName)
+    const errors = parse(candidate).diagnostics.filter((d) => d.severity === 'error')
+    if (errors.length) return err(`Typed FSF replacement rejected before writing: ${errors[0]!.message.slice(0, 240)}`)
+  }
   let next = source
   if (op.pre !== undefined) next = patchProcessCondition(next, resolved.name, 'pre', op.pre)
   if (op.post !== undefined) next = patchProcessCondition(next, resolved.name, 'post', op.post)
   if (op.fsf !== undefined) {
-    const patched = patchProcessFsfText(next, resolved.name, op.fsf)
+    const patched = patchProcessFsfText(next, resolved.name, op.fsf, resolved.moduleName)
     if (patched === next) return err(`Cannot write FSF for process ${resolved.name}`)
     next = patched
   }

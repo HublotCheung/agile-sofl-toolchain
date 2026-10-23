@@ -127,10 +127,9 @@ function formatModuleInventory(model: VisualModelResult, mod: VisualModelResult[
     lines.push(`- ${formatHybridId('const', mod.name, c.name)} (const) ${c.name}${desc}`)
   }
 
-  const invUsed = new Set<string>()
-  for (const inv of mod.invariants) {
-    const name = uniqueSlug(inv.text, invUsed)
-    lines.push(`- ${formatHybridId('inv', mod.name, name)} (inv) ${clip(inv.text, 240)}`)
+  for (let i = 0; i < mod.invariants.length; i++) {
+    const inv = mod.invariants[i]!
+    lines.push(`- ${formatHybridId('inv', mod.name, String(i))} (inv) ${clip(inv.text, 240)}`)
   }
 
   for (const proc of mod.processes) {

@@ -29,4 +29,43 @@ describe('modeling provenance',()=>{
     const source=after.entities.find(e=>e.side==='informal')!
     expect(()=>bindGeneratedTrace(before,after,[{sourceId:source.locator,targetId:'Borrow'}],pair.informalPath,pair.hybridPath,()=>crypto.randomUUID())).toThrow('unresolved')
   })
+  it('resolves a named invariant among several new ones in the same module', () => {
+    const before = refreshTrace(emptyTrace(), pair)
+    const after = refreshTrace(structuredClone(before), {
+      ...pair,
+      hybrid:
+        'module SYSTEM_Library;\nvar limit: nat;\nvar cap: nat;\ninv\n  limit > 0;\n  cap >= limit;\nend_module;'
+    })
+    const source = after.entities.find((e) => e.side === 'informal')!.locator
+    bindGeneratedTrace(
+      before,
+      after,
+      [{ sourceId: source, targetId: 'inv:Library.CapLimit', relation: 'constrains' }],
+      pair.informalPath,
+      pair.hybridPath,
+      () => crypto.randomUUID()
+    )
+    const capInv = after.entities.find((e) => e.kind === 'invariant' && e.text.includes('cap >='))!
+    expect(after.links.some((l) => l.target === capInv.id && l.relation === 'constrains')).toBe(true)
+  })
+
+  it('ignores module scaffolding links and resolves a named new invariant in its module',()=>{
+    const before=refreshTrace(emptyTrace(),pair)
+    const after=refreshTrace(structuredClone(before),{...pair,hybrid:'module SYSTEM_Library;\nvar\n    limit: nat;\ninv\n    limit > 0;\nprocess Borrow() success: nat\nFSF : limit > 0 && success = 1 || others && success = 0\nend_process;\nend_module;'})
+    const source=after.entities.find(e=>e.side==='informal')!.locator
+    bindGeneratedTrace(before,after,[
+      {sourceId:source,targetId:'mod:SYSTEM_Library'},
+      {sourceId:source,targetId:'proc:SYSTEM_Library.Borrow'},
+      {sourceId:source,targetId:'inv:SYSTEM_Library.LimitPositive',relation:'constrains'}
+    ],pair.informalPath,pair.hybridPath,()=>crypto.randomUUID())
+    const inv=after.entities.find(e=>e.kind==='invariant')!
+    expect(after.links.some(l=>l.target===inv.id&&l.relation==='constrains')).toBe(true)
+  })
+  it('reports every unresolved target with the valid ids of its module',()=>{
+    const before=refreshTrace(emptyTrace(),pair)
+    const after=refreshTrace(structuredClone(before),{...pair,hybrid:'module SYSTEM_Library;\nprocess Borrow()\npost true\nend_process;\nend_module;'})
+    const source=after.entities.find(e=>e.side==='informal')!.locator
+    expect(()=>bindGeneratedTrace(before,after,[{sourceId:source,targetId:'proc:SYSTEM_Library.Lend'}],pair.informalPath,pair.hybridPath,()=>crypto.randomUUID()))
+      .toThrow(/valid targets in SYSTEM_Library: proc:Library\.Borrow[\s\S]*Missing generation provenance for proc:Library\.Borrow/)
+  })
 })
