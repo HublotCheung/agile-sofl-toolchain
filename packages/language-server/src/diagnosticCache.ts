@@ -35,7 +35,7 @@ export function diagnosticsForDocument(document: TextDocument): Diagnostic[] {
   const prev = incrementalStates.get(uri)
   const { diagnostics, state } = checkIncremental(text, prev)
   incrementalStates.set(uri, state)
-  const lspDiagnostics = parserDiagnosticsToLsp(diagnostics, text)
+  const lspDiagnostics = parserDiagnosticsToLsp(diagnostics, text, uri)
   diagnosticCache.set(uri, { version: document.version, contentHash: hash, diagnostics: lspDiagnostics, incrementalState: state })
   return lspDiagnostics
 }

@@ -4,9 +4,10 @@
     {
       "label": "Build Editor Stack",
       "type": "shell",
-      "command": "npm run build && npm run build --prefix packages/language-server && node packages/language-server/scripts/bundle.mjs && npm run build --prefix packages/vscode",
+      "command": "npm run build:editor-stack",
       "options": { "cwd": "${workspaceFolder}" },
-      "group": "build"
+      "group": "build",
+      "problemMatcher": []
     }
   ]
 }

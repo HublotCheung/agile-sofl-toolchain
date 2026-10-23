@@ -19,14 +19,15 @@ describe('projectManifest', () => {
     const nested = join(root, 'DemoSys')
     const manifest = createProjectTemplate(nested, 'DemoSys')
     expect(manifest.name).toBe('DemoSys')
-    expect(manifest.guiModule).toBe('GUI_App')
+    expect(manifest.guiModule).toBeUndefined()
     expect(readManifest(nested)?.informal).toBe('informal.aspec')
     expect(readFileSync(join(nested, 'informal.aspec'), 'utf-8')).toContain('# Functions')
-    expect(readFileSync(join(nested, 'hybrid.asfl'), 'utf-8')).toContain('module GUI_App')
-    expect(readFileSync(join(nested, 'gui.html'), 'utf-8')).toContain('data-screen')
+    expect(readFileSync(join(nested, 'hybrid.asfl'), 'utf-8')).toContain('module SYSTEM_DemoSys')
+    expect(readFileSync(join(nested, 'hybrid.asfl'), 'utf-8')).not.toContain('GUI_App')
+    expect(readFileSync(join(nested, 'gui.html'), 'utf-8')).not.toContain('OpenNext')
   })
 
-  it('hybrid template parses as a program with a GUI module', async () => {
+  it('hybrid template parses as a program with only the system module', async () => {
     const root = mkdtempSync(join(tmpdir(), 'asfl-parse-'))
     dirs.push(root)
     const nested = join(root, 'DemoSys')
@@ -35,8 +36,8 @@ describe('projectManifest', () => {
     const source = readFileSync(join(nested, 'hybrid.asfl'), 'utf-8')
     const result = parse(source)
     expect(result.ast?.type).toBe('program')
-    expect(result.ast?.modules.map((m) => m.name)).toEqual(expect.arrayContaining(['DemoSys', 'GUI_App']))
-    expect(result.ast?.modules.find((m) => m.name === 'GUI_App')?.gui).toBeTruthy()
+    expect(result.ast?.modules.map((m) => m.name)).toEqual(['DemoSys'])
+    expect(result.diagnostics.filter((d) => d.severity === 'error')).toHaveLength(0)
   })
 
   it('infers manifest from existing spec files', async () => {

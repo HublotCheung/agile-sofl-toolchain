@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ACCENT_PRESETS,
+  accentForeground,
   accentMixPercent,
   accentTintPercent,
   clampTransparency,
@@ -25,6 +26,10 @@ describe('appearance', () => {
 
   it('defaults to blue and accepts custom hex', () => {
     expect(resolveAccentHex('blue', '', false)).toBe(ACCENT_PRESETS.blue.light)
+    expect(resolveAccentHex('blue', '', true)).toBe(ACCENT_PRESETS.blue.dark)
+    expect(ACCENT_PRESETS.blue).toEqual({ light: '#0c628c', dark: '#8fcfe6' })
+    expect(accentForeground('#0c628c')).toBe('#ffffff')
+    expect(accentForeground('#8fcfe6')).toBe('#12181d')
     expect(resolveAccentHex('custom', '#abc', true)).toBe('#aabbcc')
     expect(normalizeHex('2563EB')).toBe('#2563eb')
     expect(UI_ZOOM_FACTOR.xlarge).toBeGreaterThan(UI_ZOOM_FACTOR.small)

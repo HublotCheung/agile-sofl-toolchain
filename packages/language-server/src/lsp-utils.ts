@@ -3,7 +3,7 @@
  */
 
 import type { Diagnostic as AsflDiagnostic } from '@agile-sofl/parser'
-import type { TextDocument } from 'vscode-languageserver-textdocument'
+import { TextDocument } from 'vscode-languageserver-textdocument'
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node.js'
 import { spanToRange } from './position.js'
 
@@ -24,7 +24,7 @@ export function parserDiagnosticsToLsp(
   source: string,
   uri = 'file:///inline.asfl'
 ): Diagnostic[] {
-  const document = { uri, getText: () => source } as TextDocument
+  const document = TextDocument.create(uri, 'agile-sofl', 0, source)
   return diagnostics.map((d) => diagnosticToLsp(d, document))
 }
 

@@ -140,7 +140,6 @@ export function createProjectTemplate(root: string, name: string): AgileSoflMani
   const manifest: AgileSoflManifest = {
     version: '1.0',
     name,
-    guiModule: 'GUI_App',
     informal,
     hybrid: [hybrid],
     gui
@@ -162,33 +161,6 @@ export function createProjectTemplate(root: string, name: string): AgileSoflMani
     join(root, hybrid),
     `module SYSTEM_${ident};
 end_module
-module GUI_App / ${ident};
-const
-    view_home = 0;
-    view_next = 1;
-type
-    ViewId = nat;
-var
-    current_view: ViewId;
-inv
-    current_view >= 0 and current_view <= 1;
-gui AppGui;
-  screen Home triggers OpenNext;
-  screen Next triggers OpenHome;
-end_gui;
-process OpenNext ()
-    pre
-        true
-    post
-        current_view = 1
-end_process
-process OpenHome ()
-    pre
-        true
-    post
-        current_view = 0
-end_process
-end_module
 `,
     'utf-8'
   )
@@ -196,20 +168,7 @@ end_module
   writeFileSync(
     join(root, gui),
     `<div class="as-app" data-app="${ident}App">
-  <section class="as-screen" id="view-home" data-screen="Home">
-    <h1 class="as-title">Home</h1>
-    <div class="as-stack as-gap-md">
-      <p class="as-muted">Application views.</p>
-      <button class="as-btn as-btn-primary" data-process="OpenNext" data-nav="Next">Open</button>
-    </div>
-  </section>
-  <section class="as-screen is-hidden" id="view-next" data-screen="Next">
-    <h1 class="as-title">Next</h1>
-    <div class="as-stack as-gap-md">
-      <p class="as-muted">Next view</p>
-      <button class="as-btn" data-process="OpenHome" data-nav="Home">Back</button>
-    </div>
-  </section>
+  <section class="as-screen" data-screen="Home"></section>
 </div>
 `,
     'utf-8'

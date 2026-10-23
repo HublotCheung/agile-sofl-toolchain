@@ -25,15 +25,15 @@ function css(name: string, fallback: string): string {
 
 function theme() {
   return {
-    accent: css('--accent', '#00668b'),
-    warning: css('--semantic-warning', '#d97706'),
-    error: css('--semantic-error', '#e11d48'),
-    text: css('--text-primary', '#15202b'),
-    muted: css('--text-muted', '#7a8490'),
-    secondary: css('--text-secondary', '#4a5560'),
+    accent: css('--accent', '#0c628c'),
+    warning: css('--semantic-warning', '#8a5a10'),
+    error: css('--semantic-error', '#9e2f2b'),
+    text: css('--text-primary', '#12181d'),
+    muted: css('--text-muted', '#52606c'),
+    secondary: css('--text-secondary', '#3d4c58'),
     raised: css('--surface-raised', '#ffffff'),
-    overlay: css('--surface-overlay', '#f3f5f7'),
-    border: css('--border-subtle', '#d8dee6')
+    overlay: css('--surface-overlay', '#e1e8ed'),
+    border: css('--border-subtle', '#8aa0ae')
   }
 }
 

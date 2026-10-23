@@ -91,6 +91,7 @@ export type TelemetryEvent =
   | { event: 'llm_call'; model: string; promptTokens: number | null; completionTokens: number | null; latencyMs: number; ok: boolean; reasoning?: 'low' | 'off' | string; attempt?: number; retryReason?: string; finishReason?: string; toolCalls?: string[]; promptChars?: number; prompt?: unknown; error?: string }
   | { event: 'proposal_decision'; tool: string; stepType?: string; decision: 'approved' | 'rejected' | 'error'; toolCallId: string }
   | { event: 'session_start'; semanticChecks: boolean; warning?: string }
+  | { event: 'full_read_diagnostics'; toolCallId: string; diagnostics: unknown }
   | { event: 'post_write_diagnostics'; toolCallId: string; diagnostics: DiagnosticCounts }
 
 export function telemetryPath(projectRoot: string): string {

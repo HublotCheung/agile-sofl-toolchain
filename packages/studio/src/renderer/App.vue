@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import EditorLayout from './layouts/EditorLayout.vue'
+import FirstRunSetup from './components/onboarding/FirstRunSetup.vue'
 import { useAppStore } from './stores/app'
 import { useDocumentStore } from './stores/document'
 import { useLspStore } from './stores/lsp'
@@ -13,6 +14,9 @@ const doc = useDocumentStore()
 const lsp = useLspStore()
 const workspace = useWorkspaceStore()
 const settings = useSettingsStore()
+const showFirstRunSetup = ref(
+  localStorage.getItem('studio-setup-complete') !== 'true' && !localStorage.getItem('studio-locale')
+)
 
 onMounted(async () => {
   await initLocaleFromSystem()
@@ -36,4 +40,5 @@ if (typeof window !== 'undefined') {
 
 <template>
   <EditorLayout />
+  <FirstRunSetup v-if="showFirstRunSetup" @complete="showFirstRunSetup = false" />
 </template>

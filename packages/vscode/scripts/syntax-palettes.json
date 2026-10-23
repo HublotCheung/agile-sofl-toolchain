@@ -1,12 +1,12 @@
 {
   "dark": {
     "editor": {
-      "background": "#1e1e1e",
-      "foreground": "#d4d4d4"
+      "background": "#0e1418",
+      "foreground": "#e8eef2"
     },
     "field": {
-      "background": "#252526",
-      "foreground": "#d4d4d4"
+      "background": "#172027",
+      "foreground": "#e8eef2"
     },
     "rules": [
       { "token": "keyword.control.asfl", "foreground": "C586C0" },
@@ -50,11 +50,11 @@
   "light": {
     "editor": {
       "background": "#ffffff",
-      "foreground": "#1e1e1e"
+      "foreground": "#12181d"
     },
     "field": {
       "background": "#ffffff",
-      "foreground": "#1e1e1e"
+      "foreground": "#12181d"
     },
     "rules": [
       { "token": "keyword.control.asfl", "foreground": "AF00DB" },

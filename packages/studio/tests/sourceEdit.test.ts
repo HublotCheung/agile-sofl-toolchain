@@ -20,6 +20,16 @@ describe('applySourceEdits', () => {
     expect(r.content).toBe('module Foo;\nend_module')
   })
 
+  it('accepts a unique match that differs only in whitespace or line endings', () => {
+    const r = applySourceEdits('module Foo;\r\nend_module\r\nmodule Bar;\r\nend_module', [
+      { op: 'replace', oldText: 'module Foo; end_module', newText: 'module Foo;\nconst x = 1;\nend_module' }
+    ])
+    expect(r.error).toBeUndefined()
+    expect(r.content.startsWith('module Foo;\nconst x = 1;\nend_module\r\nmodule Bar;')).toBe(true)
+    const twice = applySourceEdits('end_module\nend_module', [{ op: 'replace', oldText: 'end_module ', newText: 'x' }])
+    expect(twice.applied).toBe(false)
+  })
+
   it('errors on ambiguous replace unless all:true', () => {
     const src = 'aa aa'
     const once = applySourceEdits(src, [{ op: 'replace', oldText: 'aa', newText: 'bb' }])

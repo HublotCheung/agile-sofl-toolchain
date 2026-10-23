@@ -1,11 +1,24 @@
 import { collectHybridAgentDiagnostics } from '@agile-sofl/editor-api'
+import { check } from '@agile-sofl/parser'
 import { setHybridWriteDiagnosticCollector } from '../shared/asflRepair'
 import { conditionNotice, getExperimentConfig } from './services/llm/experiment'
 
-setHybridWriteDiagnosticCollector(collectHybridAgentDiagnostics)
+setHybridWriteDiagnosticCollector((source) => {
+  const fromModel = collectHybridAgentDiagnostics(source)
+  const fromParse = check(source, { fsfL1: false }).diagnostics
+    .filter((d) => d.severity === 'error')
+    .map((d) => ({ severity: d.severity, code: d.code, message: d.message }))
+  return [...fromModel, ...fromParse]
+})
 import { app, ipcMain, BrowserWindow } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { runCopyrightCapture } from './services/copyrightCapture'
+
+if (process.env.STUDIO_CAPTURE === '1' && process.env.STUDIO_CAPTURE_USER_DATA) {
+  mkdirSync(process.env.STUDIO_CAPTURE_USER_DATA, { recursive: true })
+  app.setPath('userData', process.env.STUDIO_CAPTURE_USER_DATA)
+}
 import { registerFileHandlers } from './services/fileService'
 import { registerTextSearchHandlers } from './services/textSearchService'
 import { registerWindowHandlers } from './services/windowService'
@@ -44,15 +57,16 @@ function getWindow(): BrowserWindow | null {
 }
 
 function createWindow(): void {
+  const capture = process.env.STUDIO_CAPTURE === '1'
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: capture ? 1440 : 1280,
+    height: capture ? 900 : 800,
     minWidth: 800,
     minHeight: 500,
     frame: false,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     icon: resolveAppIcon(),
-    backgroundColor: '#1e1e1e',
+    backgroundColor: '#0e1418',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -89,6 +103,13 @@ function createWindow(): void {
     setTimeout(() => {
       if (mainWindow && !mainWindow.isDestroyed()) startLanguageServer()
     }, 2000)
+    if (process.env.STUDIO_CAPTURE === '1' && mainWindow) {
+      const win = mainWindow
+      void runCopyrightCapture(win).catch((err) => {
+        console.error('[copyright-capture]', err)
+        app.exit(1)
+      })
+    }
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

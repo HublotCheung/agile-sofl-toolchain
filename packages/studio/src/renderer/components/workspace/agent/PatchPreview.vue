@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { InformalPatchPayload } from '../../../../preload/index'
+import { groupPatchOperations, sectionStartsOpen } from './patchSections'
 
 const props = defineProps<{
   patch: InformalPatchPayload
@@ -11,11 +13,35 @@ const props = defineProps<{
   toolError?: string
 }>()
 const emit = defineEmits<{ apply: []; reject: [] }>()
+const { t } = useI18n()
 
 const target = computed(() =>
   props.patch.target === 'hybrid' ? 'hybrid' : props.patch.target === 'gui' ? 'gui' : 'informal'
 )
 const sourceMode = computed(() => props.patch.mode === 'source')
+const sections = computed(() => groupPatchOperations(props.patch.operations ?? []))
+const sectionOverride = ref<Record<string, boolean>>({})
+const explanationOpen = ref(false)
+const explanationLong = computed(() => (props.patch.explanation ?? '').trim().length > 80)
+
+function isSectionOpen(id: string, count: number): boolean {
+  const value = sectionOverride.value[id]
+  if (value != null) return value
+  return sectionStartsOpen(count)
+}
+
+function toggleSection(id: string, count: number): void {
+  sectionOverride.value = { ...sectionOverride.value, [id]: !isSectionOpen(id, count) }
+}
+
+function sectionTitle(id: string): string {
+  if (id === 'functions') return t('agent.sectionFunctions')
+  if (id === 'data') return t('agent.sectionData')
+  if (id === 'constraints') return t('agent.sectionConstraints')
+  if (id === 'source') return t('agent.patchModeSource')
+  if (id === 'other') return t('agent.sectionOther')
+  return id.replace(/[-_]/g, ' ')
+}
 
 function verb(op: Record<string, unknown>): string {
   const kind = String(op.op || '')
@@ -72,35 +98,41 @@ function tone(op: Record<string, unknown>): string {
 </script>
 
 <template>
-  <div class="agent-bubble mt-2 min-w-0 max-w-full overflow-hidden rounded-xl bg-surface-raised p-3">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-content-muted">
-      {{ $t('agent.proposedChanges') }}
-      <span class="ml-1 font-normal normal-case">{{
-        target === 'hybrid'
-          ? $t('agent.patchTargetHybrid')
-          : target === 'gui'
-            ? $t('agent.patchTargetGui')
-            : $t('agent.patchTargetInformal')
-      }}</span>
-      <span v-if="sourceMode" class="ml-1 font-normal normal-case text-semantic-warning">{{
-        $t('agent.patchModeSource')
-      }}</span>
-    </p>
-    <p v-if="patch.explanation" class="studio-text-selectable mt-1 break-words text-[13px] text-content-secondary">
-      {{ patch.explanation }}
-    </p>
-    <ul class="mt-2 space-y-1">
-      <li
-        v-for="(op, i) in patch.operations"
-        :key="i"
-        class="flex min-w-0 gap-2 font-mono text-[12px]"
-        :class="tone(op)"
-      >
-        <span class="w-4 shrink-0 font-semibold">{{ verb(op) }}</span>
-        <span class="min-w-0 truncate" :title="label(op)">{{ label(op) }}</span>
-      </li>
-    </ul>
-    <p v-if="resolution === 'applied'" class="mt-2 text-[12px] text-content-muted">
+  <div class="agent-bubble mt-1 min-w-0 max-w-full overflow-hidden rounded-lg bg-surface-raised px-2.5 py-2">
+    <div class="flex items-start justify-between gap-2">
+      <p class="min-w-0 text-[11px] font-semibold uppercase tracking-wide text-content-secondary">
+        {{ $t('agent.proposedChanges') }}
+        <span class="ml-1 font-normal normal-case">{{
+          target === 'hybrid'
+            ? $t('agent.patchTargetHybrid')
+            : target === 'gui'
+              ? $t('agent.patchTargetGui')
+              : $t('agent.patchTargetInformal')
+        }}</span>
+        <span v-if="sourceMode" class="ml-1 font-normal normal-case text-semantic-warning">{{
+          $t('agent.patchModeSource')
+        }}</span>
+      </p>
+      <div v-if="pending" class="flex shrink-0 gap-1.5">
+        <button
+          type="button"
+          class="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-fg disabled:opacity-40"
+          :disabled="disabled"
+          @click="emit('apply')"
+        >
+          {{ $t('agent.apply') }}
+        </button>
+        <button
+          type="button"
+          class="rounded-md border border-border-subtle px-2.5 py-1 text-[12px] text-content-secondary hover:bg-surface-overlay disabled:opacity-40"
+          :disabled="disabled"
+          @click="emit('reject')"
+        >
+          {{ $t('agent.reject') }}
+        </button>
+      </div>
+    </div>
+    <p v-if="resolution === 'applied'" class="mt-1 text-[12px] text-content-secondary">
       {{
         target === 'hybrid'
           ? $t('agent.appliedHybrid')
@@ -109,31 +141,58 @@ function tone(op: Record<string, unknown>): string {
             : $t('agent.applied')
       }}
     </p>
-    <p v-else-if="resolution === 'rejected'" class="mt-2 text-[12px] text-content-muted">{{ $t('agent.rejected') }}</p>
-    <p v-else-if="resolution === 'error'" class="mt-2 text-[12px] text-semantic-error">
+    <p v-else-if="resolution === 'rejected'" class="mt-1 text-[12px] text-content-secondary">{{ $t('agent.rejected') }}</p>
+    <p v-else-if="resolution === 'error'" class="mt-1 text-[12px] text-semantic-error">
       {{ $t('agent.patchToolFailed') }}
       <span v-if="toolError" class="mt-1 block whitespace-pre-wrap break-words font-normal text-semantic-error">{{
         toolError
       }}</span>
     </p>
-    <p v-else-if="autoApplying" class="mt-2 text-[12px] text-content-muted">{{ $t('agent.autoApplying') }}</p>
-    <div v-else-if="pending" class="mt-3 flex gap-2">
-      <button
-        type="button"
-        class="rounded-md bg-accent px-3 py-1 text-[12px] font-medium text-accent-fg disabled:opacity-40"
-        :disabled="disabled"
-        @click="emit('apply')"
-      >
-        {{ $t('agent.apply') }}
-      </button>
-      <button
-        type="button"
-        class="rounded-md border border-border-subtle px-3 py-1 text-[12px] text-content-secondary hover:bg-surface-overlay disabled:opacity-40"
-        :disabled="disabled"
-        @click="emit('reject')"
-      >
-        {{ $t('agent.reject') }}
-      </button>
+    <p v-else-if="autoApplying" class="mt-1 text-[12px] text-content-secondary">{{ $t('agent.autoApplying') }}</p>
+    <p
+      v-if="patch.explanation"
+      class="studio-text-selectable mt-1 break-words text-[12px] leading-snug text-content-secondary"
+      :class="explanationOpen ? '' : 'line-clamp-2'"
+    >
+      {{ patch.explanation }}
+    </p>
+    <button
+      v-if="explanationLong"
+      type="button"
+      class="mt-0.5 text-[11px] font-medium text-accent"
+      @click="explanationOpen = !explanationOpen"
+    >
+      {{ explanationOpen ? $t('agent.collapse') : $t('agent.expand') }}
+    </button>
+    <div v-if="sections.length" class="mt-1 max-h-72 overflow-y-auto studio-scroll">
+      <section v-for="section in sections" :key="section.id" class="border-t border-border-subtle">
+        <button
+          type="button"
+          class="flex w-full items-center gap-1.5 py-1 text-left text-[12px]"
+          :aria-expanded="isSectionOpen(section.id, section.items.length)"
+          @click="toggleSection(section.id, section.items.length)"
+        >
+          <span class="w-3 shrink-0 text-center text-[10px] text-content-muted" aria-hidden="true">{{
+            isSectionOpen(section.id, section.items.length) ? '▾' : '▸'
+          }}</span>
+          <span class="min-w-0 flex-1 truncate font-medium text-content-primary">{{ sectionTitle(section.id) }}</span>
+          <span class="shrink-0 font-mono text-[11px] text-content-secondary">{{ section.items.length }}</span>
+          <span class="sr-only">{{
+            isSectionOpen(section.id, section.items.length) ? $t('agent.collapse') : $t('agent.expand')
+          }}</span>
+        </button>
+        <ul v-if="isSectionOpen(section.id, section.items.length)" class="space-y-0.5 pb-1 pl-4">
+          <li
+            v-for="item in section.items"
+            :key="item.index"
+            class="flex min-w-0 gap-2 font-mono text-[12px] leading-snug"
+            :class="tone(item.op)"
+          >
+            <span class="w-4 shrink-0 font-semibold">{{ verb(item.op) }}</span>
+            <span class="min-w-0 truncate" :title="label(item.op)">{{ label(item.op) }}</span>
+          </li>
+        </ul>
+      </section>
     </div>
   </div>
 </template>

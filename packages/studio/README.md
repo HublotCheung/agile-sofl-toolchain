@@ -25,6 +25,10 @@ From repository root, run `studio.bat` — it builds parser + language server bu
 studio.bat
 ```
 
+To create the distributable Windows installer, run `package-studio-win.bat` from the repository root. It installs the locked workspace dependencies and writes the NSIS installer to `packages/studio/release/`. The installer bundles the Studio project templates and language server.
+
+On first launch, Studio opens a setup screen for language, theme, and an optional OpenAI-compatible LLM profile. Users can skip LLM setup and add it later from Settings.
+
 ## Development
 
 From repository root:

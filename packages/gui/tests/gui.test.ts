@@ -151,6 +151,10 @@ describe('patchGui', () => {
     expect(home).not.toContain('data-screen="Cart"')
     expect(cart).toContain('data-screen="Cart"')
     expect(cart).not.toContain('data-screen="Home"')
+    const hidden = `<div class="as-app"><section class="as-screen is-hidden" data-screen="交易明细"><h1 class="as-title">交易明细</h1></section></div>`
+    const shown = extractScreenHtml(hidden, '交易明细')
+    expect(shown).toContain('交易明细')
+    expect(shown).not.toContain('is-hidden')
     const page = wrapPrototypeHtml('Shop', home)
     expect(page).toContain('data-app="Shop"')
     expect(page).toContain('data-screen="Home"')

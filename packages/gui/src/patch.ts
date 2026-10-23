@@ -436,6 +436,10 @@ export function extractScreenHtml(source: string, screenId: string): string {
   const root = parseHtmlFragment(document.html)
   const screen = screenNode(root, screenId)
   if (!screen) return ''
+  // A screen stored as inactive (is-hidden) must still render when opened alone.
+  const classes = (screen.attrs.class ?? '').split(/\s+/).filter((c) => c && c !== 'is-hidden')
+  if (classes.length) screen.attrs.class = classes.join(' ')
+  else delete screen.attrs.class
   return sanitizeHtml(serializeHtml(screen))
 }
 

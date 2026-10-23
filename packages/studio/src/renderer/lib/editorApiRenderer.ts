@@ -2,7 +2,7 @@
  * Renderer-safe subset of @agile-sofl/editor-api (no @agile-sofl/parser dependency).
  * Vite aliases `@agile-sofl/editor-api` to this module in the renderer bundle.
  */
-export { namesEqual, canonicalModuleName } from '../../../../editor-api/src/hybridIds.js'
+export { namesEqual, canonicalModuleName, labelsMatch, uniqueSlug } from '../../../../editor-api/src/hybridIds.js'
 export { countBySeverity, mergeDiagnostics, adjustFsfDiagnosticSeverity } from '../../../../editor-api/src/mergeDiagnostics.js'
 export { filterDiagnosticsBySelection } from '../../../../editor-api/src/filterDiagnostics.js'
 export { buildModuleGraphLayout, decorateProcessLabel } from '../../../../editor-api/src/moduleGraphLayout.js'

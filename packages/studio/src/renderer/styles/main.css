@@ -3,60 +3,59 @@
 @tailwind utilities;
 
 :root {
-  /* Warm mineral paper. Hex is the sRGB rendering of an OKLCH ramp (hue ~80–95, low chroma).
-     Mixes stay in oklab so an accent tint does not go muddy. */
-  --accent-raw: #00668b;
+  /* High-contrast cool slate. Accent mixes stay in oklab so a tint does not muddy the ink. */
+  --accent-raw: #0c628c;
   --accent-mix: 80%;
   --accent-tint: 8%;
   --accent-tint-n: 8;
-  --accent-mute: #fcfbf8;
-  --accent-fg: #f4f3ee;
+  --accent-mute: #ffffff;
+  --accent-fg: #ffffff;
   --ui-zoom: 1;
-  --surface-base-raw: #f2f1ed;
-  --surface-raised-raw: #fcfbf8;
-  --surface-overlay-raw: #edece6;
+  --surface-base-raw: #f3f6f8;
+  --surface-raised-raw: #ffffff;
+  --surface-overlay-raw: #e1e8ed;
   --surface-base: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.4%), var(--surface-base-raw));
   --surface-raised: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.18%), var(--surface-raised-raw));
   --surface-overlay: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.32%), var(--surface-overlay-raw));
-  --text-primary: #322d26;
-  --text-secondary: #56524b;
-  --text-muted: #6d6861;
+  --text-primary: #12181d;
+  --text-secondary: #3d4c58;
+  --text-muted: #52606c;
   --accent: color-mix(in oklab, var(--accent-raw) var(--accent-mix), var(--accent-mute));
-  --border-subtle: color-mix(in oklab, var(--accent-raw) 8%, #dad7d0);
-  --danger: #9c433f;
-  --danger-fg: #f4f3ee;
+  --border-subtle: color-mix(in oklab, var(--accent-raw) 14%, #8aa0ae);
+  --danger: #9e2f2b;
+  --danger-fg: #ffffff;
   --field-bg: var(--surface-raised);
   --field-border: var(--border-subtle);
   --field-border-focus: var(--accent);
-  --role-process: #146272;
-  --role-function: #9b532a;
-  --map-frontend: #0e6c66;
-  --map-backend: #326541;
-  --map-database: #535088;
-  --map-process: #146272;
-  --map-store: #694a77;
-  --map-external: #66635a;
-  --map-start: #326541;
-  --map-active: #0e6c66;
-  --map-waiting: #856214;
-  --map-decision: #9b532a;
-  --map-success: #326541;
-  --map-failure: #9c433f;
-  --semantic-warning: #856214;
-  --semantic-error: #9c433f;
-  --semantic-success: #326541;
-  --kind-type: #535088;
-  --kind-var: #326541;
-  --section-functions: #146272;
-  --section-data: #856214;
-  --section-constraints: #535088;
+  --role-process: #0c628c;
+  --role-function: #8a5a10;
+  --map-frontend: #0c628c;
+  --map-backend: #147a38;
+  --map-database: #2e3a8c;
+  --map-process: #0c628c;
+  --map-store: #5c3d78;
+  --map-external: #3d4c58;
+  --map-start: #147a38;
+  --map-active: #0c628c;
+  --map-waiting: #8a5a10;
+  --map-decision: #8a5a10;
+  --map-success: #147a38;
+  --map-failure: #9e2f2b;
+  --semantic-warning: #8a5a10;
+  --semantic-error: #9e2f2b;
+  --semantic-success: #147a38;
+  --kind-type: #2e3a8c;
+  --kind-var: #147a38;
+  --section-functions: #0c628c;
+  --section-data: #8a5a10;
+  --section-constraints: #2e3a8c;
   --scrollbar-size: 6px;
   --scrollbar-track: color-mix(in oklab, var(--accent-raw) 8%, transparent);
-  --scrollbar-thumb: color-mix(in oklab, var(--accent-raw) 16%, rgba(50, 45, 38, 0.28));
-  --scrollbar-thumb-hover: color-mix(in oklab, var(--accent-raw) 28%, rgba(50, 45, 38, 0.42));
-  --git-modified: #7e5c2a;
-  --git-added: #346c42;
-  --git-deleted: #9c443b;
+  --scrollbar-thumb: color-mix(in oklab, var(--accent-raw) 16%, rgba(18, 24, 29, 0.32));
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--accent-raw) 28%, rgba(18, 24, 29, 0.48));
+  --git-modified: #8a5a10;
+  --git-added: #147a38;
+  --git-deleted: #9e2f2b;
   --gui-canvas: #f7f7f4;
   --gui-canvas-soft: #fafaf7;
   --gui-ink: #26251e;
@@ -77,53 +76,53 @@
 .git-status-deleted, .git-status-conflicted { color: var(--git-deleted) !important; }
 
 .dark {
-  --accent-raw: #79b4d2;
-  --accent-mute: #1a1814;
-  --accent-fg: #322d26;
-  --surface-base-raw: #1a1814;
-  --surface-raised-raw: #25221f;
-  --surface-overlay-raw: #302d29;
+  --accent-raw: #8fcfe6;
+  --accent-mute: #0e1418;
+  --accent-fg: #12181d;
+  --surface-base-raw: #0e1418;
+  --surface-raised-raw: #172027;
+  --surface-overlay-raw: #22313b;
   --surface-base: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.4%), var(--surface-base-raw));
   --surface-raised: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.18%), var(--surface-raised-raw));
   --surface-overlay: color-mix(in oklab, var(--accent-raw) calc(var(--accent-tint-n) * 0.32%), var(--surface-overlay-raw));
-  --text-primary: #e9e8e2;
-  --text-secondary: #bfbeb7;
-  --text-muted: #9b9890;
+  --text-primary: #e8eef2;
+  --text-secondary: #a9b8c2;
+  --text-muted: #8a9ba6;
   --accent: color-mix(in oklab, var(--accent-raw) var(--accent-mix), var(--accent-mute));
-  --border-subtle: color-mix(in oklab, var(--accent-raw) 12%, #403d37);
-  --danger: #de958e;
-  --danger-fg: #322d26;
+  --border-subtle: color-mix(in oklab, var(--accent-raw) 16%, #3e5360);
+  --danger: #f0a8a4;
+  --danger-fg: #12181d;
   --field-bg: var(--surface-raised);
   --field-border: var(--border-subtle);
   --field-border-focus: var(--accent);
-  --role-process: #89bbc7;
-  --role-function: #dba383;
-  --map-frontend: #8bc4be;
-  --map-backend: #93bd9d;
-  --map-database: #acabdc;
-  --map-process: #89bbc7;
-  --map-store: #c0a6cc;
-  --map-external: #a7a49c;
-  --map-start: #93bd9d;
-  --map-active: #8bc4be;
-  --map-waiting: #d5ba82;
-  --map-decision: #dba383;
-  --map-success: #93bd9d;
-  --map-failure: #de958e;
-  --semantic-warning: #d5ba82;
-  --semantic-error: #de958e;
-  --semantic-success: #93bd9d;
-  --kind-type: #acabdc;
-  --kind-var: #93bd9d;
-  --section-functions: #89bbc7;
-  --section-data: #d5ba82;
-  --section-constraints: #acabdc;
+  --role-process: #8fcfe6;
+  --role-function: #e4c36a;
+  --map-frontend: #8fcfe6;
+  --map-backend: #8ee0a8;
+  --map-database: #c5c8f2;
+  --map-process: #8fcfe6;
+  --map-store: #d4b4e0;
+  --map-external: #a9b8c2;
+  --map-start: #8ee0a8;
+  --map-active: #8fcfe6;
+  --map-waiting: #e4c36a;
+  --map-decision: #e4c36a;
+  --map-success: #8ee0a8;
+  --map-failure: #f0a8a4;
+  --semantic-warning: #e4c36a;
+  --semantic-error: #f0a8a4;
+  --semantic-success: #8ee0a8;
+  --kind-type: #c5c8f2;
+  --kind-var: #8ee0a8;
+  --section-functions: #8fcfe6;
+  --section-data: #e4c36a;
+  --section-constraints: #c5c8f2;
   --scrollbar-track: color-mix(in oklab, var(--accent-raw) 10%, transparent);
-  --scrollbar-thumb: color-mix(in oklab, var(--accent-raw) 18%, rgba(233, 232, 226, 0.16));
-  --scrollbar-thumb-hover: color-mix(in oklab, var(--accent-raw) 30%, rgba(233, 232, 226, 0.28));
-  --git-modified: #cfb384;
-  --git-added: #88c19b;
-  --git-deleted: #dc8c7f;
+  --scrollbar-thumb: color-mix(in oklab, var(--accent-raw) 18%, rgba(232, 238, 242, 0.22));
+  --scrollbar-thumb-hover: color-mix(in oklab, var(--accent-raw) 30%, rgba(232, 238, 242, 0.36));
+  --git-modified: #e4c36a;
+  --git-added: #8ee0a8;
+  --git-deleted: #f0a8a4;
   --gui-canvas: #1e1e1e;
   --gui-canvas-soft: #252526;
   --gui-ink: #e8e8e8;
@@ -267,7 +266,7 @@ select:focus-visible {
   transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
   user-select: text !important;
   -webkit-user-select: text !important;
-  box-shadow: 0 1px 2px rgba(50, 45, 38, 0.05);
+  box-shadow: 0 1px 2px rgba(18, 24, 29, 0.08);
   overflow-wrap: anywhere;
 }
 
@@ -277,12 +276,12 @@ select:focus-visible {
 }
 
 .agent-bubble-user {
-  background: color-mix(in oklab, var(--accent) 10%, var(--surface-raised));
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface-raised));
   color: var(--text-primary);
 }
 
 .agent-bubble-assistant {
-  background: var(--surface-base);
+  background: var(--surface-raised);
   color: var(--text-primary);
 }
 

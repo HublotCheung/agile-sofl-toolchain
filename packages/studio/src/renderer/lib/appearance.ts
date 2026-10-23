@@ -1,9 +1,9 @@
 export type AccentId = 'blue' | 'green' | 'orange' | 'purple' | 'yellow' | 'red' | 'pink' | 'custom'
 export type UiZoom = 'small' | 'normal' | 'large' | 'xlarge'
 
-/** OKLCH-authored accents: one hue per preset, lower chroma in dark mode. */
+/** Preset accents. Blue is the high-contrast default used by main.css. */
 export const ACCENT_PRESETS: Record<Exclude<AccentId, 'custom'>, { light: string; dark: string }> = {
-  blue: { light: '#00668b', dark: '#79b4d2' },
+  blue: { light: '#0c628c', dark: '#8fcfe6' },
   green: { light: '#1e6d54', dark: '#82bda5' },
   orange: { light: '#a14e20', dark: '#e0a07d' },
   purple: { light: '#6e4993', dark: '#b79dd6' },
@@ -58,7 +58,7 @@ export function accentForeground(hex: string): string {
   const g = (n >> 8) & 255
   const b = n & 255
   const y = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  return y > 0.62 ? '#322d26' : '#f4f3ee'
+  return y > 0.62 ? '#12181d' : '#ffffff'
 }
 
 export type AppearanceState = {

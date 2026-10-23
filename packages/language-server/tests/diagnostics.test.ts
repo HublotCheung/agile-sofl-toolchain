@@ -54,6 +54,17 @@ describe('Diagnostic cache', () => {
     expect(second).toBe(first)
   })
 
+  it('builds LSP ranges for documents that have diagnostics', () => {
+    clearDiagnosticCache()
+    const source = `module SYSTEM_U;
+var x: MissingType;
+end_module`
+    const diagnostics = diagnosticsForDocument(doc(source, 1, 'file:///diag-pos.asfl'))
+    expect(diagnostics.length).toBeGreaterThan(0)
+    expect(diagnostics[0].range.start.line).toBeGreaterThanOrEqual(0)
+    expect(diagnostics[0].range.end.character).toBeGreaterThan(0)
+  })
+
   it('recomputes when document version changes', () => {
     clearDiagnosticCache()
     const uri = 'file:///cache-version.asfl'

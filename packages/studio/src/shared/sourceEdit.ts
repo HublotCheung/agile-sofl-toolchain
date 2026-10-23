@@ -38,6 +38,13 @@ function clip(text: string, n: number): string {
   return `${compact.slice(0, Math.max(0, n - 1))}…`
 }
 
+function looseMatches(content: string, oldText: string): Array<[number, number]> {
+  const parts = oldText.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return []
+  const pattern = new RegExp(parts.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g')
+  return [...content.matchAll(pattern)].map((m) => [m.index!, m.index! + m[0].length])
+}
+
 export function applySourceEdits(
   source: string,
   operations: Array<Record<string, unknown>>
@@ -68,7 +75,19 @@ export function applySourceEdits(
       }
       const count = content.split(oldText).length - 1
       if (count === 0) {
-        warnings.push(`oldText not found: ${clip(oldText, 80)}`)
+        // Models often reflow whitespace / line endings when copying numbered source.
+        // Accept a unique whitespace-insensitive match; never guess between several.
+        const loose = looseMatches(content, oldText)
+        if (loose.length === 1 && op.all !== true) {
+          const [start, end] = loose[0]!
+          content = content.slice(0, start) + newText + content.slice(end)
+          continue
+        }
+        warnings.push(
+          loose.length > 1
+            ? `oldText matched ${loose.length} times (ignoring whitespace). Use a unique snippet: ${clip(oldText, 80)}`
+            : `oldText not found: ${clip(oldText, 80)}. Copy it verbatim from read_* view=source (without line-number prefixes).`
+        )
         continue
       }
       if (count > 1 && op.all !== true) {

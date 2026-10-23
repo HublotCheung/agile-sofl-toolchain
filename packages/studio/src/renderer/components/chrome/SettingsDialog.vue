@@ -363,7 +363,7 @@ async function copyDump(): Promise<void> {
                   <input
                     type="color"
                     class="h-8 w-10 cursor-pointer rounded border border-border-subtle bg-transparent"
-                    :value="normalizeHex(settings.customHex) ?? '#00668b'"
+                    :value="normalizeHex(settings.customHex) ?? '#0c628c'"
                     @input="onCustomHex(($event.target as HTMLInputElement).value)"
                   />
                   <input

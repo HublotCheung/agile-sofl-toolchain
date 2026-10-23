@@ -1,6 +1,27 @@
 "use strict";
 const electron = require("electron");
 const studio = {
+  traceStructurePreview: (pair, ids, parts) => electron.ipcRenderer.invoke("studio:trace-structure-preview", pair, ids, parts),
+  traceStructurePrepare: (pair, id, plan) => electron.ipcRenderer.invoke("studio:trace-structure-prepare", pair, id, plan),
+  traceRead: (pair, hints) => electron.ipcRenderer.invoke("studio:trace-read", pair, hints),
+  traceSave: (pair, document, expected) => electron.ipcRenderer.invoke("studio:trace-save", pair, document, expected),
+  traceRecover: (pair, scope, locale, options) => electron.ipcRenderer.invoke("studio:trace-recover", pair, scope, locale, options),
+  traceProviders: () => electron.ipcRenderer.invoke("studio:trace-providers"),
+  traceAssess: (pair, id, locale, options) => electron.ipcRenderer.invoke("studio:trace-assess", pair, id, locale, options),
+  traceMerge: (pair, base, remote, choices) => electron.ipcRenderer.invoke("studio:trace-merge", pair, base, remote, choices),
+  traceStage: (pair, document, changes) => electron.ipcRenderer.invoke("studio:trace-stage", pair, document, changes),
+  traceFinish: (pair, id, state) => electron.ipcRenderer.invoke("studio:trace-finish", pair, id, state),
+  traceTransactions: (pair) => electron.ipcRenderer.invoke("studio:trace-transactions", pair),
+  traceRestore: (pair, id, choice) => electron.ipcRenderer.invoke("studio:trace-restore", pair, id, choice),
+  traceSaveFiles: (pair, changes, revision) => electron.ipcRenderer.invoke("studio:trace-save-files", pair, changes, revision),
+  traceOnProgress: (cb) => {
+    const handler = (_event, data) => cb(data);
+    electron.ipcRenderer.on("studio:trace-progress", handler);
+    return () => electron.ipcRenderer.removeListener("studio:trace-progress", handler);
+  },
+  traceSuggest: (pair, linkId, direction, locale, options) => electron.ipcRenderer.invoke("studio:trace-suggest", pair, linkId, direction, locale, options),
+  tracePrepare: (pair, proposal, selected) => electron.ipcRenderer.invoke("studio:trace-prepare", pair, proposal, selected),
+  traceCancel: () => electron.ipcRenderer.invoke("studio:trace-cancel"),
   minimize: () => electron.ipcRenderer.invoke("studio:window-minimize"),
   maximize: () => electron.ipcRenderer.invoke("studio:window-maximize"),
   close: () => electron.ipcRenderer.invoke("studio:window-close"),

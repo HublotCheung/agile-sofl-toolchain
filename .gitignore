@@ -13,3 +13,12 @@ coverage/
 docs/Aigle-SOFL.pdf
 packages/studio/.env
 packages/studio/.harness/
+scripts/soft-copyright/signatures/*
+!scripts/soft-copyright/signatures/.gitkeep
+scripts/soft-copyright/personal-info.json
+/output/soft-copyright
+/docs/soft-copyright
+/output
+/scripts/soft-copyright
+packages/studio/.env.ecnu
+/packages/studio/out

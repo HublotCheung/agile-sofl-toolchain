@@ -1,4 +1,5 @@
 import { collectHybridAgentDiagnostics } from '@agile-sofl/editor-api'
+import { check } from '@agile-sofl/parser'
 import { beforeAll, describe, expect, it } from 'vitest'
 import {
   acceptHybridWrite,
@@ -81,6 +82,18 @@ end_module
     expect(gated.content).toBe(before)
     expect(gated.error).toMatch(/not kept/)
     expect(gated.error).toMatch(/@/)
+  })
+
+  it('refuses a write when the full parser reports new errors', () => {
+    setHybridWriteDiagnosticCollector((source) =>
+      check(source, { fsfL1: false }).diagnostics
+        .filter((d) => d.severity === 'error')
+        .map((d) => ({ severity: d.severity, code: d.code, message: d.message }))
+    )
+    const after = before.replace('end_module', 'forall u: nat, x iff y\nend_module')
+    const gated = acceptHybridWrite(before, after)
+    expect(gated.ok).toBe(false)
+    expect(gated.content).toBe(before)
   })
 })
 

@@ -95,31 +95,38 @@ function onOptionClick(opt: { id: string; label: string }): void {
 </script>
 
 <template>
-  <div class="agent-bubble mt-2 min-w-0 max-w-full overflow-hidden rounded-xl bg-surface-raised">
+  <div class="agent-bubble mt-1 min-w-0 max-w-full overflow-hidden rounded-lg bg-surface-raised">
     <button
       type="button"
-      class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-overlay"
+      class="flex w-full items-start gap-2 px-2 py-1 text-left hover:bg-surface-overlay"
+      :aria-expanded="expanded"
+      :title="answer ? `${question} — ${answer}` : question"
       @click="emit('toggle')"
     >
-      <span class="studio-text-selectable min-w-0 flex-1 truncate text-[12px] font-medium text-content-primary">{{
-        question
-      }}</span>
-      <span v-if="answer" class="studio-text-selectable max-w-[45%] truncate text-[11px] text-content-muted">{{
-        answer
-      }}</span>
-      <span class="select-none text-[11px] text-content-muted">{{ expanded ? '▾' : '▸' }}</span>
+      <span class="studio-text-selectable min-w-0 flex-1">
+        <span class="block truncate text-[12px] font-medium leading-snug text-content-primary">{{ question }}</span>
+        <span
+          v-if="answer && !expanded"
+          class="block truncate text-[12px] font-normal leading-snug text-content-secondary"
+        >{{ answer }}</span>
+      </span>
+      <span
+        class="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-border-subtle text-[11px] leading-none text-content-secondary"
+        aria-hidden="true"
+      >{{ expanded ? '▾' : '▸' }}</span>
+      <span class="sr-only">{{ expanded ? $t('agent.collapse') : $t('agent.expand') }}</span>
     </button>
-    <div v-if="expanded" class="min-w-0 border-t border-border-subtle px-3 pb-3 pt-2">
-      <div v-if="options?.length" class="flex min-w-0 flex-col gap-1.5">
+    <div v-if="expanded" class="min-w-0 border-t border-border-subtle px-2 pb-2 pt-1.5">
+      <div v-if="options?.length" class="flex min-w-0 flex-col gap-1">
         <button
           v-for="opt in options"
           :key="opt.id"
           type="button"
-          class="max-w-full min-w-0 truncate rounded-full border px-3 py-1 text-left text-[12px] transition-colors"
+          class="max-w-full min-w-0 truncate rounded-md border px-2 py-0.5 text-left text-[12px] leading-snug transition-colors"
           :class="
             isChosen(opt)
-              ? 'border-content-primary bg-content-primary/10 text-content-primary'
-              : 'border-border-subtle text-content-secondary hover:border-content-primary/40 hover:text-content-primary'
+              ? 'border-accent bg-accent/10 text-content-primary'
+              : 'border-border-subtle text-content-secondary hover:border-accent/50 hover:text-content-primary'
           "
           :title="opt.label"
           :disabled="disabled"
@@ -128,10 +135,10 @@ function onOptionClick(opt: { id: string; label: string }): void {
           {{ opt.label }}
         </button>
       </div>
-      <div v-if="pending && allowCustom !== false" class="mt-2">
+      <div v-if="pending && allowCustom !== false" class="mt-1.5">
         <input
           v-model="custom"
-          class="w-full rounded-md border border-field-border bg-field-bg px-2.5 py-1.5 text-[13px] text-content-primary outline-none focus:ring-2 focus:ring-accent/30"
+          class="w-full rounded-md border border-field-border bg-field-bg px-2 py-1 text-[12px] text-content-primary outline-none focus:ring-2 focus:ring-accent/30"
           :placeholder="$t('agent.customAnswer')"
           :disabled="disabled"
           @keydown="onCustomKeydown"
@@ -139,7 +146,7 @@ function onOptionClick(opt: { id: string; label: string }): void {
       </div>
       <p
         v-if="!pending && answer"
-        class="studio-text-selectable mt-2 min-w-0 truncate rounded-md bg-surface-base px-2.5 py-1.5 text-[12px] text-content-secondary"
+        class="studio-text-selectable mt-1.5 min-w-0 truncate rounded-md bg-surface-base px-2 py-1 text-[12px] text-content-secondary"
         :title="answer"
       >
         {{ $t('agent.yourAnswer') }}：{{ answer }}
@@ -147,7 +154,7 @@ function onOptionClick(opt: { id: string; label: string }): void {
       <button
         v-if="pending"
         type="button"
-        class="mt-2 rounded-md bg-accent px-3 py-1 text-[12px] font-medium text-accent-fg disabled:opacity-40"
+        class="mt-1.5 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-fg disabled:opacity-40"
         :disabled="disabled || !canSubmit"
         @click="submit"
       >

@@ -109,10 +109,6 @@ const projectRoot = computed(() => workspace.activeProject?.rootPath ?? '')
 const visibleSessions = computed(() =>
   sessions.value.filter((s) => (showArchived.value ? s.archived : !s.archived))
 )
-const lastClarificationId = computed(() => {
-  const asks = session.value?.messages.filter((m) => m.clarification) ?? []
-  return asks[asks.length - 1]?.id
-})
 const visibleMessages = computed(
   () => session.value?.messages.filter((m) => m.role !== 'tool') ?? []
 )
@@ -268,8 +264,54 @@ function queueScroll(): void {
 
 function isCardExpanded(id: string): boolean {
   if (cardOpen.value[id] != null) return cardOpen.value[id]
-  return id === lastClarificationId.value
+  const msg = session.value?.messages.find((m) => m.id === id)
+  if (!msg?.clarification) return false
+  if (msg.clarification.answer && !msg.pending) return false
+  return true
 }
+
+function toolResultText(callId: string): string {
+  if (!callId) return ''
+  const hit = session.value?.messages.find((m) => m.role === 'tool' && m.id === callId)
+  return hit?.content ?? ''
+}
+
+function messageIsToolOnly(msg: AgentMessageView): boolean {
+  if (msg.role !== 'assistant') return false
+  if (editingUserMessageId.value === msg.id) return false
+  if (String(msg.content ?? '').trim() || String(msg.thinking ?? '').trim()) return false
+  return Boolean(msg.toolCalls?.length)
+}
+
+watch(
+  () => {
+    const id = session.value?.id ?? ''
+    const answered = (session.value?.messages ?? [])
+      .filter((m) => Boolean(m.clarification?.answer) && !m.pending)
+      .map((m) => m.id)
+      .join('\n')
+    return `${id}::${answered}`
+  },
+  (now, prev) => {
+    if (prev == null) return
+    const split = (value: string) => {
+      const mark = value.indexOf('::')
+      return [value.slice(0, mark), value.slice(mark + 2)] as const
+    }
+    const [prevSession, prevIds] = split(prev)
+    const [nextSession, nextIds] = split(now)
+    if (prevSession !== nextSession) return
+    const before = new Set(prevIds ? prevIds.split('\n') : [])
+    const next = { ...cardOpen.value }
+    let changed = false
+    for (const id of nextIds.split('\n')) {
+      if (!id || before.has(id) || next[id] !== true) continue
+      next[id] = false
+      changed = true
+    }
+    if (changed) cardOpen.value = next
+  }
+)
 
 function toggleCard(id: string): void {
   cardOpen.value = { ...cardOpen.value, [id]: !isCardExpanded(id) }
@@ -641,8 +683,12 @@ async function maybeAutoApply(sessionId?: string): Promise<void> {
     const stillPending = liveSession(id)?.messages.some(
       (m) => m.id === pending.id && m.pending && m.proposedChanges
     )
-    if (stillPending) autoApplyTried.delete(pending.id)
-    return
+    if (stillPending) {
+      autoApplyTried.delete(pending.id)
+      return
+    }
+    // The failure was handed back to the agent, and the resumed turn may already have
+    // proposed a repair while autoApplyLock was held. Apply it instead of stalling.
   }
   await maybeAutoApply(id)
 }
@@ -1157,20 +1203,31 @@ function permBadge(s: AgentSessionPayload): string {
       <div class="flex h-full min-h-0 min-w-0 flex-col">
         <div
           ref="thread"
-          class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 studio-scroll"
+          class="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-2 py-2 studio-scroll"
           @scroll.passive="onThreadScroll"
         >
           <p v-if="!visibleMessages.length" class="text-[13px] leading-relaxed text-content-secondary">
             {{ t('agent.emptyHint') }}
           </p>
-          <div v-for="msg in visibleMessages" :key="msg.id" class="mb-3 min-w-0 max-w-full">
+          <div
+            v-for="msg in visibleMessages"
+            :key="msg.id"
+            class="min-w-0 max-w-full"
+            :class="messageIsToolOnly(msg) ? 'mb-1' : 'mb-2'"
+          >
             <div
-              class="agent-bubble studio-text-selectable max-w-[92%] min-w-0 overflow-hidden rounded-2xl px-3 py-2 text-[13px] leading-relaxed break-words"
-              :class="msg.role === 'user' ? 'agent-bubble-user ml-auto' : 'agent-bubble-assistant'"
+              class="agent-bubble studio-text-selectable max-w-[92%] min-w-0 overflow-hidden text-[13px] leading-snug break-words"
+              :class="
+                msg.role === 'user'
+                  ? 'agent-bubble-user ml-auto rounded-lg px-2.5 py-1.5'
+                  : messageIsToolOnly(msg)
+                    ? 'agent-bubble-assistant rounded-md px-1.5 py-0.5'
+                    : 'agent-bubble-assistant rounded-lg px-2.5 py-1.5'
+              "
             >
               <details
                 v-if="msg.thinking"
-                class="mb-2 text-[12px] text-content-muted"
+                class="mb-1 text-[12px] text-content-muted"
                 :open="isThinkingLive(msg)"
               >
                 <summary class="cursor-pointer select-none text-[11px] font-medium uppercase tracking-wide">
@@ -1182,6 +1239,7 @@ function permBadge(s: AgentSessionPayload): string {
                 v-for="(call, i) in msg.toolCalls"
                 :key="`${msg.id}-tool-${i}`"
                 :call="call"
+                :result="toolResultText(call.id)"
                 :message-streaming="Boolean(msg.streaming)"
                 :busy="busy"
               />
@@ -1211,7 +1269,8 @@ function permBadge(s: AgentSessionPayload): string {
               <p v-else-if="shouldShowThinkingPlaceholder(msg)" class="text-[12px] text-content-muted">{{ t('agent.thinking') }}</p>
               <div
                 v-if="!msg.streaming || msg.content"
-                class="mt-2 flex cursor-default select-none items-center gap-0.5 border-t border-border-subtle pt-1"
+                class="flex cursor-default select-none items-center gap-0.5"
+                :class="messageIsToolOnly(msg) ? 'mt-0' : 'mt-1.5 border-t border-border-subtle pt-1'"
               >
                 <template v-if="msg.role === 'user' && editingUserMessageId === msg.id">
                   <IconActionButton
@@ -1281,7 +1340,7 @@ function permBadge(s: AgentSessionPayload): string {
             />
             <ul
               v-if="msg.review?.issues?.length"
-              class="agent-bubble mt-2 min-w-0 max-w-full space-y-1 overflow-hidden rounded-xl bg-surface-base p-2"
+              class="agent-bubble mt-1 min-w-0 max-w-full space-y-1 overflow-hidden rounded-lg bg-surface-raised p-2"
             >
               <li
                 v-for="(issue, i) in msg.review.issues"
