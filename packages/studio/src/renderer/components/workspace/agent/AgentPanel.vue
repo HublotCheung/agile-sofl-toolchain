@@ -317,11 +317,17 @@ function toggleCard(id: string): void {
   cardOpen.value = { ...cardOpen.value, [id]: !isCardExpanded(id) }
 }
 
+async function syncLlmConfigured(): Promise<boolean> {
+  const status = await window.studio?.llmStatus?.()
+  configured.value = status?.configured ?? false
+  if (configured.value && error.value === t('agent.missingKey')) error.value = ''
+  return configured.value
+}
+
 async function refresh(): Promise<void> {
   if (!projectRoot.value || !window.studio?.agentListSessions) return
   sessions.value = await window.studio.agentListSessions(projectRoot.value)
-  const status = await window.studio.llmStatus?.()
-  configured.value = status?.configured ?? false
+  await syncLlmConfigured()
 }
 
 async function ensureSession(): Promise<AgentSessionPayload | null> {
@@ -361,7 +367,9 @@ async function send(text?: string, opts?: { sessionId?: string }): Promise<void>
   }
   const showError = !opts?.sessionId || opts.sessionId === session.value?.id
   if (showError) error.value = ''
-  if (!configured.value) {
+  // Status is cached at the last session refresh. Re-read it so a profile saved
+  // in Settings is visible on the next send.
+  if (!(await syncLlmConfigured())) {
     if (showError) error.value = t('agent.missingKey')
     return
   }
@@ -885,10 +893,7 @@ async function launchFromBootstrap(req: HybridAgentBootstrapPayload): Promise<vo
       error.value = t('informal.startGenerateFailed')
       return
     }
-    if (!configured.value) {
-      const status = await window.studio.llmStatus?.()
-      configured.value = status?.configured ?? false
-    }
+    if (!configured.value) await syncLlmConfigured()
     const created = await window.studio.agentCreateSession(
       toIpcValue({
         projectRoot: rootAtStart,
@@ -1095,6 +1100,13 @@ onMounted(() => {
     if (copiedTimer) clearTimeout(copiedTimer)
   })
 })
+
+watch(
+  () => settings.open,
+  (isOpen, wasOpen) => {
+    if (wasOpen && !isOpen) void syncLlmConfigured()
+  }
+)
 
 watch(projectRoot, () => {
   projectGen += 1

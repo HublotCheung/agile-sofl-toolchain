@@ -117,10 +117,26 @@ export function dumpLlmProfiles(store: LlmStoreFile): string {
   return JSON.stringify({ activeId: store.activeId, profiles: store.profiles }, null, 2)
 }
 
+export function profileHasKey(profile: LlmProfile | null | undefined): boolean {
+  return Boolean(profile?.apiKey?.trim())
+}
+
+/**
+ * Saving a profile with a key should take over when nothing usable is active.
+ * An explicit activate request still wins, including switching between keyed profiles.
+ */
+export function savedProfileBecomesActive(options: {
+  requested: boolean
+  activeHasKey: boolean
+  savedHasKey: boolean
+}): boolean {
+  return options.requested || (!options.activeHasKey && options.savedHasKey)
+}
+
 export function resolveActiveProfile(store: LlmStoreFile): LlmProfile | null {
-  if (store.activeId) {
-    const active = store.profiles.find((p) => p.id === store.activeId)
-    if (active) return active
-  }
-  return store.profiles.find((p) => p.apiKey.trim()) ?? store.profiles[0] ?? null
+  const active = store.activeId
+    ? (store.profiles.find((p) => p.id === store.activeId) ?? null)
+    : null
+  if (profileHasKey(active)) return active
+  return store.profiles.find((p) => profileHasKey(p)) ?? active ?? store.profiles[0] ?? null
 }

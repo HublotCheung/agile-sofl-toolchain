@@ -9,7 +9,13 @@ import {
   resolveAccentHex,
   UI_ZOOM_FACTOR
 } from '../src/renderer/lib/appearance'
-import { parseLlmImport, maskApiKey, parseProfile } from '../src/main/services/llm/profileFormat'
+import {
+  maskApiKey,
+  parseLlmImport,
+  parseProfile,
+  resolveActiveProfile,
+  savedProfileBecomesActive
+} from '../src/main/services/llm/profileFormat'
 
 describe('appearance', () => {
   it('clamps transparency and maps mix/tint', () => {
@@ -67,5 +73,42 @@ describe('llm profile JSON', () => {
     expect(result.mode).toBe('replace')
     expect(result.activeId).toBe('keep-me')
     expect(result.profiles[0].apiKey).toBe('secret')
+  })
+
+  it('uses a saved key when the marked active profile has none', () => {
+    const profile = resolveActiveProfile({
+      activeId: 'empty',
+      profiles: [
+        { id: 'empty', name: 'Empty', baseUrl: 'https://a.example/v1', apiKey: '', model: 'm' },
+        { id: 'keyed', name: 'Keyed', baseUrl: 'https://b.example/v1', apiKey: 'sk-1', model: 'm2' }
+      ]
+    })
+    expect(profile?.id).toBe('keyed')
+  })
+
+  it('keeps the active profile when that profile has a key', () => {
+    const profile = resolveActiveProfile({
+      activeId: 'a',
+      profiles: [
+        { id: 'a', name: 'A', baseUrl: 'https://a.example/v1', apiKey: 'aaa', model: 'm1' },
+        { id: 'b', name: 'B', baseUrl: 'https://b.example/v1', apiKey: 'bbb', model: 'm2' }
+      ]
+    })
+    expect(profile?.id).toBe('a')
+  })
+
+  it('activates a saved key only when the current active profile cannot be used', () => {
+    expect(
+      savedProfileBecomesActive({ requested: false, activeHasKey: false, savedHasKey: true })
+    ).toBe(true)
+    expect(
+      savedProfileBecomesActive({ requested: false, activeHasKey: true, savedHasKey: true })
+    ).toBe(false)
+    expect(
+      savedProfileBecomesActive({ requested: true, activeHasKey: true, savedHasKey: true })
+    ).toBe(true)
+    expect(
+      savedProfileBecomesActive({ requested: false, activeHasKey: false, savedHasKey: false })
+    ).toBe(false)
   })
 })

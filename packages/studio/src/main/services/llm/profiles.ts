@@ -7,7 +7,9 @@ import {
   newProfileId,
   normalizeBaseUrl,
   parseLlmImport,
+  profileHasKey,
   resolveActiveProfile,
+  savedProfileBecomesActive,
   toPublicProfile,
   type LlmProfile,
   type LlmProfilePublic,
@@ -72,7 +74,7 @@ export function listLlmProfiles(): { activeId: string | null; profiles: LlmProfi
 
 export function getActiveLlmConfig(): { apiKey: string; baseUrl: string; model: string } | null {
   const active = resolveActiveProfile(readStore())
-  if (!active?.apiKey.trim()) return null
+  if (!profileHasKey(active)) return null
   return {
     apiKey: active.apiKey.trim(),
     baseUrl: normalizeBaseUrl(active.baseUrl) || envFallback().baseUrl,
@@ -101,6 +103,9 @@ export function saveLlmProfile(draft: LlmProfileDraft): {
   const store = readStore()
   const existing = draft.id ? store.profiles.find((p) => p.id === draft.id) : undefined
   const id = existing?.id ?? newProfileId()
+  const activeBefore = store.activeId
+    ? store.profiles.find((p) => p.id === store.activeId)
+    : undefined
   const next: LlmProfile = {
     id,
     name: (draft.name ?? existing?.name ?? '').trim() || (draft.model ?? existing?.model ?? 'LLM'),
@@ -116,7 +121,15 @@ export function saveLlmProfile(draft: LlmProfileDraft): {
   } else {
     store.profiles = [...store.profiles, next]
   }
-  if (draft.activate || !store.activeId) store.activeId = id
+  if (
+    savedProfileBecomesActive({
+      requested: Boolean(draft.activate),
+      activeHasKey: profileHasKey(activeBefore),
+      savedHasKey: profileHasKey(next)
+    })
+  ) {
+    store.activeId = id
+  }
   writeStore(store)
   return { ...listLlmProfiles(), savedId: id }
 }
