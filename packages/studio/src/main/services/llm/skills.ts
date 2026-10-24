@@ -60,7 +60,11 @@ Stakeholder decisions:
 - After an answer, apply only what was confirmed; ask again if another distinct stakeholder choice remains open.
 Pipeline — keep going after each applied patch until every enabled stage is done, then summarize:
 1. Read Informal and Hybrid inventories. If Hybrid already exists and strategy is ask, call ask_clarification (merge vs rebuild).
-2. Module architecture: add the SYSTEM_ module, then each semantic module (and a GUI module) with propose_hybrid_changes op=add kind=module. Do not paste module source.
+2. Module architecture: add the SYSTEM_ module, then each semantic module with propose_hybrid_changes op=add kind=module. Do not paste module source.
+GUI module decision (once, before you treat architecture as done):
+- Parameter GUI=true: add an empty child module GUI_App (parentId = the SYSTEM_ module). No sample screens, view constants, or OpenNext/OpenHome processes.
+- Parameter GUI=false: do not add a GUI module and do not ask.
+- Parameter absent, and the inventory has no GUI module (no name starting with GUI_, no gui block): call ask_clarification — "是否创建 GUI 模块？" options create-gui-module "创建空的 GUI_App" and skip-gui-module "暂不创建". Create only the empty GUI_App child when the user chooses create. Do not invent a GUI module in silence.
 3. Per module: add types/variables from Data Resources (kind=type|var, parentId=mod:…).
 4. Per module: add process signatures from Functions (kind=process).
 5. Per process: replace-process-body or add scenarios. Write the FSF (FSF : T1 && D1 || T2 && D2 || … || others && Dn); Ti/Di may be structured natural language at this stage. Enumerations use {<Tag>}.

@@ -6,6 +6,7 @@ import { useDocumentStore } from '../../stores/document'
 import { useHistoryStore } from '../../stores/history'
 import { HistoryKinds } from '../../history/kinds'
 import { monaco, initMonacoBase } from '../../monaco/setup'
+import { editorThemeName } from '../../monaco/themes'
 import type { CoverageReportPayload } from '../../preload/index'
 import CoveragePanel from './CoveragePanel.vue'
 
@@ -92,7 +93,7 @@ async function ensureDiffEditor(): Promise<void> {
     automaticLayout: true,
     renderSideBySide: true,
     fontSize: 12,
-    theme: isDark ? 'agile-sofl-dark' : 'agile-sofl-light',
+    theme: editorThemeName(isDark),
     scrollBeyondLastLine: false
   })
   syncDiffModels()

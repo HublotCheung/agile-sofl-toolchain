@@ -88,8 +88,8 @@ async function completeSetup(): Promise<void> {
 
         <section>
           <h2 class="mb-2 text-sm font-semibold text-content-primary">{{ t('onboarding.theme') }}</h2>
-          <div class="grid grid-cols-3 gap-2">
-            <button v-for="option in ([['light', 'onboarding.themeLight'], ['dark', 'onboarding.themeDark'], ['system', 'onboarding.themeSystem']] as const)" :key="option[0]" type="button" class="rounded-lg border px-3 py-2 text-sm transition-colors" :class="theme === option[0] ? 'border-accent bg-accent/10 text-content-primary' : 'border-border-subtle text-content-secondary hover:bg-surface-overlay'" @click="selectTheme(option[0])">
+          <div class="grid grid-cols-2 gap-2">
+            <button v-for="option in ([['light', 'onboarding.themeLight'], ['dark', 'onboarding.themeDark'], ['contrast', 'onboarding.themeContrast'], ['system', 'onboarding.themeSystem']] as const)" :key="option[0]" type="button" class="rounded-lg border px-3 py-2 text-sm transition-colors" :class="theme === option[0] ? 'border-accent bg-accent/10 text-content-primary' : 'border-border-subtle text-content-secondary hover:bg-surface-overlay'" @click="selectTheme(option[0])">
               {{ t(option[1]) }}
             </button>
           </div>

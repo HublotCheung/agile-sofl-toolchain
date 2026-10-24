@@ -11,6 +11,25 @@
   --accent-mute: #ffffff;
   --accent-fg: #ffffff;
   --ui-zoom: 1;
+  --titlebar-bg: var(--surface-raised);
+  --titlebar-fg: var(--text-secondary);
+  --titlebar-fg-strong: var(--text-primary);
+  --titlebar-hover: var(--surface-overlay);
+  --titlebar-border: var(--border-subtle);
+  --agent-assistant-bg: var(--surface-raised);
+  --agent-assistant-border: var(--border-subtle);
+  --agent-user-bg: color-mix(in oklab, var(--accent) 14%, var(--surface-raised));
+  --clarify-border: var(--border-subtle);
+  --clarify-header-bg: transparent;
+  --proposal-apply-bg: var(--accent);
+  --proposal-apply-fg: var(--accent-fg);
+  --proposal-apply-border: transparent;
+  --proposal-reject-bg: transparent;
+  --proposal-reject-fg: var(--text-secondary);
+  --proposal-reject-border: var(--border-subtle);
+  --proposal-applied-bg: transparent;
+  --proposal-applied-fg: var(--text-secondary);
+  --refine-atomic: #16a34a;
   --surface-base-raw: #f3f6f8;
   --surface-raised-raw: #ffffff;
   --surface-overlay-raw: #e1e8ed;
@@ -136,6 +155,69 @@
   --gui-timeline-read: #9fbbe0;
   --gui-timeline-edit: #c0a8dd;
   --gui-timeline-done: #c08532;
+}
+
+/* Light high-contrast palette pinned to the paper mock. Not a system high-contrast theme. */
+.contrast {
+  --accent: var(--accent-raw);
+  --surface-base: #e7eef2;
+  --surface-raised: #ffffff;
+  --surface-overlay: #d7e3ea;
+  --text-primary: #12181d;
+  --text-secondary: #3d4c58;
+  --text-muted: #3d4c58;
+  --border-subtle: #8aa0ae;
+  --danger: #9e2f2b;
+  --danger-fg: #ffffff;
+  --field-bg: #ffffff;
+  --field-border: #8aa0ae;
+  --field-border-focus: var(--accent);
+  --role-process: #0c628c;
+  --role-function: #8a5a10;
+  --map-frontend: #0c628c;
+  --map-backend: #147a38;
+  --map-database: #2e3a8c;
+  --map-process: #0c628c;
+  --map-store: #5c3d78;
+  --map-external: #3d4c58;
+  --map-start: #147a38;
+  --map-active: #0c628c;
+  --map-waiting: #8a5a10;
+  --map-decision: #8a5a10;
+  --map-success: #147a38;
+  --map-failure: #9e2f2b;
+  --semantic-warning: #8a5a10;
+  --semantic-error: #9e2f2b;
+  --semantic-success: #147a38;
+  --kind-type: #2e3a8c;
+  --kind-var: #147a38;
+  --section-functions: #0c628c;
+  --section-data: #8a5a10;
+  --section-constraints: #2e3a8c;
+  --scrollbar-thumb: rgba(18, 24, 29, 0.45);
+  --scrollbar-thumb-hover: rgba(18, 24, 29, 0.62);
+  --git-modified: #8a5a10;
+  --git-added: #147a38;
+  --git-deleted: #9e2f2b;
+  --titlebar-bg: #12181d;
+  --titlebar-fg: #e8eef2;
+  --titlebar-fg-strong: #ffffff;
+  --titlebar-hover: #243038;
+  --titlebar-border: #1a242c;
+  --agent-assistant-bg: #e7f3f8;
+  --agent-assistant-border: #7eb8d4;
+  --agent-user-bg: #f4f7f9;
+  --clarify-border: #c4a36a;
+  --clarify-header-bg: #fff6e4;
+  --proposal-apply-bg: #147a38;
+  --proposal-apply-fg: #ffffff;
+  --proposal-apply-border: #0e5c2b;
+  --proposal-reject-bg: #ffffff;
+  --proposal-reject-fg: #9e2f2b;
+  --proposal-reject-border: #9e2f2b;
+  --proposal-applied-bg: #e5f6eb;
+  --proposal-applied-fg: #147a38;
+  --refine-atomic: #147a38;
 }
 
 .gui-preview {
@@ -276,13 +358,81 @@ select:focus-visible {
 }
 
 .agent-bubble-user {
-  background: color-mix(in oklab, var(--accent) 14%, var(--surface-raised));
+  background: var(--agent-user-bg);
   color: var(--text-primary);
 }
 
 .agent-bubble-assistant {
-  background: var(--surface-raised);
+  background: var(--agent-assistant-bg);
+  border-color: var(--agent-assistant-border);
   color: var(--text-primary);
+}
+
+.agent-clarify {
+  border-color: var(--clarify-border);
+}
+
+.contrast .agent-clarify:hover {
+  border-color: var(--clarify-border);
+}
+
+.contrast .agent-bubble-assistant:hover {
+  border-color: var(--agent-assistant-border);
+}
+
+.contrast .agent-clarify-option-on {
+  background: #e7f3f8;
+  border-color: #0c628c;
+}
+
+.contrast .agent-clarify-answer {
+  background: #e7f3f8;
+  border-left: 3px solid #0c628c;
+}
+
+.agent-clarify-header {
+  background: var(--clarify-header-bg);
+}
+
+.agent-proposal-apply {
+  background: var(--proposal-apply-bg);
+  color: var(--proposal-apply-fg);
+}
+
+.contrast .agent-proposal-apply {
+  border: 1px solid var(--proposal-apply-border);
+}
+
+.agent-proposal-reject {
+  background: var(--proposal-reject-bg);
+  color: var(--proposal-reject-fg);
+  border-color: var(--proposal-reject-border);
+}
+
+.agent-proposal-applied {
+  background: var(--proposal-applied-bg);
+  color: var(--proposal-applied-fg);
+}
+
+.contrast .agent-proposal-applied {
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.contrast .studio-command-trigger {
+  background: #243038;
+  color: #e8eef2;
+  border-color: #8aa0ae;
+}
+
+.contrast .studio-command-trigger:hover {
+  color: #ffffff;
+  border-color: #e8eef2;
+}
+
+.refine-atomic-swatch {
+  border-color: var(--refine-atomic);
+  background: color-mix(in srgb, var(--refine-atomic) 20%, transparent);
 }
 
 .agent-bubble button,

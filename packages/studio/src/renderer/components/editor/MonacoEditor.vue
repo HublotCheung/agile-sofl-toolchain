@@ -6,6 +6,7 @@ import { filePathsEqual } from '../../stores/tabUtils'
 import { ref, watch, onMounted, onUnmounted, shallowRef, computed, nextTick } from 'vue'
 import type * as Monaco from 'monaco-editor'
 import { monaco, initMonacoBase } from '../../monaco/setup'
+import { editorThemeName } from '../../monaco/themes'
 import { registerLanguageConfiguration, registerTextMateTokens } from '../../monaco/textmate'
 import { uriForTab } from '../../monaco/languageClient'
 import { buildMinimapOptions } from '../../monaco/minimapOptions'
@@ -414,7 +415,7 @@ async function bootMonaco(): Promise<void> {
   const isDark = document.documentElement.classList.contains('dark')
   if (container.value) {
     editor.value = monaco.editor.create(container.value, {
-      theme: isDark ? 'agile-sofl-dark' : 'agile-sofl-light',
+      theme: editorThemeName(isDark),
       automaticLayout: false,
       fontSize: 14,
       minimap: buildMinimapOptions(editorUi.showMinimap),

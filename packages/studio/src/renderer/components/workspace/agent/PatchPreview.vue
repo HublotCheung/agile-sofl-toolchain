@@ -116,7 +116,7 @@ function tone(op: Record<string, unknown>): string {
       <div v-if="pending" class="flex shrink-0 gap-1.5">
         <button
           type="button"
-          class="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-fg disabled:opacity-40"
+          class="agent-proposal-apply rounded-md px-2.5 py-1 text-[12px] font-medium disabled:opacity-40"
           :disabled="disabled"
           @click="emit('apply')"
         >
@@ -124,7 +124,7 @@ function tone(op: Record<string, unknown>): string {
         </button>
         <button
           type="button"
-          class="rounded-md border border-border-subtle px-2.5 py-1 text-[12px] text-content-secondary hover:bg-surface-overlay disabled:opacity-40"
+          class="agent-proposal-reject rounded-md border px-2.5 py-1 text-[12px] hover:bg-surface-overlay disabled:opacity-40"
           :disabled="disabled"
           @click="emit('reject')"
         >
@@ -132,7 +132,7 @@ function tone(op: Record<string, unknown>): string {
         </button>
       </div>
     </div>
-    <p v-if="resolution === 'applied'" class="mt-1 text-[12px] text-content-secondary">
+    <p v-if="resolution === 'applied'" class="agent-proposal-applied mt-1 text-[12px]">
       {{
         target === 'hybrid'
           ? $t('agent.appliedHybrid')

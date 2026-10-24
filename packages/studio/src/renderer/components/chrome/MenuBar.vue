@@ -9,6 +9,7 @@ import { useModalStore } from '../../stores/modal'
 import { useHistoryStore } from '../../stores/history'
 import { useSettingsStore } from '../../stores/settings'
 import { useSidebarViewStore } from '../../stores/sidebarView'
+import { useAppStore } from '../../stores/app'
 import { historyCommandTitle } from '../../history/kinds'
 
 const emit = defineEmits<{ edit: [cmd: string]; devTools: []; format: []; refine: [] }>()
@@ -21,10 +22,12 @@ const workspace = useWorkspaceStore()
 const history = useHistoryStore()
 const settings = useSettingsStore()
 const sidebar = useSidebarViewStore()
+const app = useAppStore()
 
 const accessKeys: Record<string, string> = {
   file: 'f',
   edit: 'e',
+  view: 'v',
   settings: 's',
   help: 'h'
 }
@@ -109,6 +112,13 @@ const editItems = computed<MenuItem[]>(() => {
   ]
 })
 
+const viewItems = computed<MenuItem[]>(() => [
+  { id: 'themeLight', label: t('menu.view.themeLight'), action: () => app.setTheme('light') },
+  { id: 'themeDark', label: t('menu.view.themeDark'), action: () => app.setTheme('dark') },
+  { id: 'themeContrast', label: t('menu.view.themeContrast'), action: () => app.setTheme('contrast') },
+  { id: 'themeSystem', label: t('menu.view.themeSystem'), action: () => app.setTheme('system') }
+])
+
 const helpItems = computed<MenuItem[]>(() => [
   {
     id: 'devTools',
@@ -143,7 +153,8 @@ const helpItems = computed<MenuItem[]>(() => [
 
 const menus = computed(() => [
   { key: 'file', label: t('menu.file'), items: fileItems.value },
-  { key: 'edit', label: t('menu.edit'), items: editItems.value }
+  { key: 'edit', label: t('menu.edit'), items: editItems.value },
+  { key: 'view', label: t('menu.view'), items: viewItems.value }
 ])
 
 const helpMenu = computed(() => ({ key: 'help', label: t('menu.help'), items: helpItems.value }))
@@ -157,7 +168,7 @@ const helpMenu = computed(() => ({ key: 'help', label: t('menu.help'), items: he
           type="button"
           role="menuitem"
           :accesskey="accessKeys[menu.key]"
-          class="rounded-md px-2.5 py-0.5 text-[13px] text-content-secondary transition-colors duration-150 hover:bg-surface-overlay hover:text-content-primary active:scale-[0.98]"
+          class="rounded-md px-2.5 py-0.5 text-[13px] text-titlebar-fg transition-colors duration-150 hover:bg-titlebar-hover hover:text-titlebar-strong active:scale-[0.98]"
           @click="toggle"
         >
           <span class="underline decoration-content-muted underline-offset-2">{{ menu.label[0] }}</span
@@ -169,7 +180,7 @@ const helpMenu = computed(() => ({ key: 'help', label: t('menu.help'), items: he
       type="button"
       role="menuitem"
       :accesskey="accessKeys.settings"
-      class="rounded-md px-2.5 py-0.5 text-[13px] text-content-secondary transition-colors duration-150 hover:bg-surface-overlay hover:text-content-primary active:scale-[0.98]"
+      class="rounded-md px-2.5 py-0.5 text-[13px] text-titlebar-fg transition-colors duration-150 hover:bg-titlebar-hover hover:text-titlebar-strong active:scale-[0.98]"
       @click="settings.show()"
     >
       <span class="underline decoration-content-muted underline-offset-2">{{ t('menu.settings')[0] }}</span
@@ -181,7 +192,7 @@ const helpMenu = computed(() => ({ key: 'help', label: t('menu.help'), items: he
           type="button"
           role="menuitem"
           :accesskey="accessKeys.help"
-          class="rounded-md px-2.5 py-0.5 text-[13px] text-content-secondary transition-colors duration-150 hover:bg-surface-overlay hover:text-content-primary active:scale-[0.98]"
+          class="rounded-md px-2.5 py-0.5 text-[13px] text-titlebar-fg transition-colors duration-150 hover:bg-titlebar-hover hover:text-titlebar-strong active:scale-[0.98]"
           @click="toggle"
         >
           <span class="underline decoration-content-muted underline-offset-2">{{ helpMenu.label[0] }}</span

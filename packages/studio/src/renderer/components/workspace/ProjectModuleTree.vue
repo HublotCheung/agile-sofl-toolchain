@@ -143,6 +143,34 @@ function moduleContext(project: IndexedProject, mod: ProjectModuleInfo): Workspa
   return { kind: 'module', project, module: mod }
 }
 
+function projectLacksGuiModule(projectId: string): boolean {
+  const mods = sortedModules(projectId)
+  return mods.length > 0 && !mods.some((m) => m.isGui)
+}
+
+const creatingGui = ref(false)
+
+async function createDefaultGuiModule(project: IndexedProject): Promise<void> {
+  if (!visual || creatingGui.value) return
+  if (project.id !== workspace.activeProjectId) {
+    const ok = await workspace.requestActivateProject(project)
+    if (!ok) return
+  }
+  const system = sortedModules(project.id).find((m) => m.isSystem)
+  creatingGui.value = true
+  try {
+    await visual.patchModule({
+      action: 'add',
+      moduleName: 'GUI_App',
+      parentName: system?.name.replace(/^SYSTEM_/, '')
+    })
+    await workspace.resyncModulesFromOpenTabs()
+    workspace.selectModule('GUI_App')
+  } finally {
+    creatingGui.value = false
+  }
+}
+
 function gitClassForProject(project: IndexedProject): string {
   return git.classForProject(project.rootPath)
 }
@@ -350,6 +378,20 @@ watch(
                 <span class="min-w-0 flex-1 truncate">{{ member.name }}</span>
               </button>
             </div>
+          </div>
+          <div
+            v-if="projectLacksGuiModule(project.id)"
+            class="mx-1.5 mb-1 mt-1 rounded border border-border-subtle bg-surface-overlay/60 px-2 py-1.5"
+          >
+            <p class="text-[11px] leading-snug text-content-secondary">{{ t('workspace.noGuiModule') }}</p>
+            <button
+              type="button"
+              class="mt-1 rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent/25 disabled:opacity-50"
+              :disabled="creatingGui || !visual"
+              @click="void createDefaultGuiModule(project)"
+            >
+              {{ t('workspace.createDefaultGuiModule') }}
+            </button>
           </div>
         </div>
       </div>

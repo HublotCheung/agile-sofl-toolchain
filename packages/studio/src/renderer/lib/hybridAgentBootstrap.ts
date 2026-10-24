@@ -30,11 +30,24 @@ export function buildClientHybridAgentBootstrap(
       ? `- 推断 Informal 未陈述的设计（窗口/视图/切换）：${params.inferUnstatedDesign ? '可以提案并标明假设' : '必须先提问'}`
       : `- Infer unstated design (windows/views/navigation): ${params.inferUnstatedDesign ? 'propose with stated assumptions' : 'ask first'}`
   ]
+  if (s.gui) {
+    extras.push(
+      zh
+        ? '- GUI 阶段已开启：必须添加空的子模块 GUI_App（挂在 SYSTEM_ 下）。不要写示例跳转进程或 Home/Next 常量。'
+        : '- GUI stage is on: add an empty child module GUI_App under SYSTEM_. Do not add sample navigation processes or Home/Next constants.'
+    )
+  } else {
+    extras.push(
+      zh
+        ? '- GUI 阶段已关闭：不要创建 GUI 模块，也不要就此提问。'
+        : '- GUI stage is off: do not create a GUI module and do not ask about one.'
+    )
+  }
   if (s.hybridSpec) {
     extras.push(
       zh
-        ? '- Hybrid Spec 全量：先划分 n 个模块（含 GUI 模块），再在各模块上生成进程与场景。'
-        : '- Full Hybrid Spec: decompose into n modules (including a GUI module), then processes and scenarios per module.'
+        ? '- Hybrid Spec 全量：先划分语义模块，再在各模块上生成进程与场景。'
+        : '- Full Hybrid Spec: decompose semantic modules, then processes and scenarios per module.'
     )
   }
   return {

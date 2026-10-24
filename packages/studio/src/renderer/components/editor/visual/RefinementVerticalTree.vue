@@ -52,7 +52,7 @@ function edgePath(from: string, to: string): string {
 }
 
 function nodeFill(n: VerticalLayoutNode): string {
-  if (n.status === 'atomic') return 'color-mix(in srgb, #16a34a 22%, var(--surface-raised))'
+  if (n.status === 'atomic') return 'color-mix(in srgb, var(--refine-atomic) 22%, var(--surface-raised))'
   if (n.status === 'ready') return 'color-mix(in srgb, var(--accent) 16%, var(--surface-raised))'
   if (n.kind === 'gap' || n.problem) return 'color-mix(in srgb, var(--semantic-warning) 16%, var(--surface-raised))'
   if (n.kind === 'module') return 'var(--surface-raised)'
@@ -60,7 +60,7 @@ function nodeFill(n: VerticalLayoutNode): string {
 }
 
 function nodeStroke(n: VerticalLayoutNode): string {
-  if (n.status === 'atomic') return '#16a34a'
+  if (n.status === 'atomic') return 'var(--refine-atomic)'
   if (n.status === 'ready') return 'var(--accent)'
   if (n.kind === 'gap' || n.problem) return 'var(--semantic-warning)'
   return 'var(--border-subtle)'
@@ -228,7 +228,7 @@ onUnmounted(() => {
   <div class="flex min-h-0 flex-1 flex-col bg-surface-base">
     <div class="flex shrink-0 flex-wrap gap-3 border-b border-border-subtle px-3 py-2 text-[10px] text-content-muted">
       <span class="inline-flex items-center gap-1.5">
-        <span class="h-3 w-3 rounded border border-[#16a34a] bg-[#16a34a]/20" />
+        <span class="refine-atomic-swatch h-3 w-3 rounded border" />
         {{ t('visual.atomicity.status.atomic') }}
       </span>
       <span class="inline-flex items-center gap-1.5">

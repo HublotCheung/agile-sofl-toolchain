@@ -1,8 +1,8 @@
 "use strict";
 const editorApi = require("@agile-sofl/editor-api");
+const parser$2 = require("@agile-sofl/parser");
 const node_fs = require("node:fs");
 const node_path = require("node:path");
-const parser$2 = require("@agile-sofl/parser");
 const electron = require("electron");
 const promises = require("node:fs/promises");
 const node_crypto = require("node:crypto");
@@ -336,7 +336,7 @@ function announceCondition(projectRoot, sessionId, cfg = getExperimentConfig(pro
   logTelemetry(projectRoot, cfg, sessionId, { event: "session_start", semanticChecks: cfg.semanticChecks, warning: msg });
   return msg;
 }
-function sleep(ms) {
+function sleep$1(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 async function runCopyrightCapture(win) {
@@ -356,7 +356,7 @@ async function runCopyrightCapture(win) {
   const shot = async (name) => {
     win.show();
     win.focus();
-    await sleep(900);
+    await sleep$1(900);
     const image = await win.capturePage();
     const file = node_path.join(outDir, `${name}.png`);
     node_fs.writeFileSync(file, image.toPNG());
@@ -376,7 +376,7 @@ async function runCopyrightCapture(win) {
         `document.body && document.body.innerText.includes(${JSON.stringify(label)})`
       );
       if (found) return;
-      await sleep(300);
+      await sleep$1(300);
     }
     throw new Error(`timed out waiting for: ${label}`);
   };
@@ -389,9 +389,9 @@ async function runCopyrightCapture(win) {
       sel.value = 'zh-CN'
       sel.dispatchEvent(new Event('change'))
     })()`);
-    await sleep(400);
+    await sleep$1(400);
     if (!await clickExact("浅色")) note("light theme button not found, continuing");
-    await sleep(300);
+    await sleep$1(300);
     await shot("01-first-run");
     if (!await clickExact("暂不配置 AI")) {
       throw new Error("could not skip onboarding");
@@ -404,7 +404,7 @@ async function runCopyrightCapture(win) {
       ui.setLanguage('zh-CN')
       ui.setTheme('light')
     })()`);
-    await sleep(600);
+    await sleep$1(600);
     await shot("02-home");
     if (await clickExact("从模板新建")) {
       const dialogStart = Date.now();
@@ -412,10 +412,10 @@ async function runCopyrightCapture(win) {
       while (Date.now() - dialogStart < 8e3) {
         dialogOpen = await ev(`!!document.querySelector('[role="dialog"]')`);
         if (dialogOpen) break;
-        await sleep(200);
+        await sleep$1(200);
       }
       if (dialogOpen) {
-        await sleep(700);
+        await sleep$1(700);
         await shot("03-template-dialog");
         const closed = await ev(`(() => {
           const dialog = document.querySelector('[role="dialog"]')
@@ -425,7 +425,7 @@ async function runCopyrightCapture(win) {
           return true
         })()`);
         if (!closed) note("template cancel not found");
-        await sleep(400);
+        await sleep$1(400);
       } else {
         note("template dialog did not open");
       }
@@ -445,25 +445,25 @@ async function runCopyrightCapture(win) {
     while (Date.now() - monacoStart < 2e4) {
       const ready = await ev(`!!document.querySelector('.monaco-editor')`);
       if (ready) break;
-      await sleep(300);
+      await sleep$1(300);
     }
-    await sleep(2200);
+    await sleep$1(2200);
     await shot("04-split-editor");
     await ev(`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('editorUi').setViewMode('code')`);
-    await sleep(800);
+    await sleep$1(800);
     await shot("05-code-editor");
     await ev(`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('editorUi').setViewMode('visual')`);
-    await sleep(1500);
+    await sleep$1(1500);
     await shot("06-visual-editor");
     if (await clickExact("关系图")) {
-      await sleep(1800);
+      await sleep$1(1800);
       await shot("07-module-graph");
     } else {
       note("graph button not found");
     }
     await ev(`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('settings').show()`);
     await waitFor("外观", 1e4);
-    await sleep(400);
+    await sleep$1(400);
     await shot("08-settings");
     await ev(`(() => {
       const dialog = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.getAttribute('aria-label') === '设置')
@@ -480,7 +480,7 @@ async function runCopyrightCapture(win) {
         `!![...document.querySelectorAll('[role="dialog"]')].find((d) => d.getAttribute('aria-label') === '设置')`
       );
       if (!stillOpen) break;
-      await sleep(200);
+      await sleep$1(200);
     }
     await ev(`(() => {
       const modal = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('modal')
@@ -498,6 +498,195 @@ async function runCopyrightCapture(win) {
     electron.app.exit(0);
   } catch (err) {
     const message = err instanceof Error ? err.stack || err.message : String(err);
+    try {
+      await shot("99-capture-failed");
+    } catch {
+    }
+    node_fs.writeFileSync(node_path.join(outDir, "capture-error.txt"), `${message}
+
+${log2.join("\n")}`, "utf8");
+    console.error(message);
+    electron.app.exit(1);
+  }
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function runPaperCapture(win) {
+  const outDir = process.env.STUDIO_CAPTURE_DIR;
+  const projectPath = process.env.STUDIO_CAPTURE_PROJECT;
+  if (!outDir || !projectPath) {
+    throw new Error("STUDIO_CAPTURE_DIR and STUDIO_CAPTURE_PROJECT are required");
+  }
+  node_fs.mkdirSync(outDir, { recursive: true });
+  const log2 = [];
+  const note = (message) => {
+    log2.push(message);
+    console.log(`[paper-capture] ${message}`);
+  };
+  const ev = (code) => win.webContents.executeJavaScript(code, true);
+  const scrubPaths = () => ev(`(() => {
+      const reps = [
+        ['D:\\\\asfl\\\\DAM', 'Project-DAM'],
+        ['D:/asfl/DAM', 'Project-DAM']
+      ]
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+      let node
+      while ((node = walker.nextNode())) {
+        let value = node.nodeValue || ''
+        for (const pair of reps) {
+          if (value.includes(pair[0])) value = value.split(pair[0]).join(pair[1])
+        }
+        if (value !== node.nodeValue) node.nodeValue = value
+      }
+    })()`);
+  const shot = async (name) => {
+    win.show();
+    win.focus();
+    await sleep(900);
+    await scrubPaths();
+    await sleep(200);
+    const image = await win.capturePage();
+    const file = node_path.join(outDir, `${name}.png`);
+    node_fs.writeFileSync(file, image.toPNG());
+    note(`saved ${file}`);
+  };
+  const waitFor = async (label, timeoutMs = 3e4) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const found = await ev(
+        `document.body && document.body.innerText.includes(${JSON.stringify(label)})`
+      );
+      if (found) return;
+      await sleep(300);
+    }
+    throw new Error(`timed out waiting for: ${label}`);
+  };
+  const clickIncludes = (fragment) => ev(`(() => {
+      const nodes = [...document.querySelectorAll('button, [role="menuitem"], a')]
+      const el = nodes.find((n) => (n.textContent || '').replace(/\\s+/g, ' ').includes(${JSON.stringify(fragment)}))
+      if (!el) return false
+      el.click()
+      return true
+    })()`);
+  const pinia = (call) => ev(`(() => {
+      const app = document.querySelector('#app').__vue_app__
+      const pinia = app.config.globalProperties.$pinia
+      ${call}
+    })()`);
+  try {
+    note(`project ${projectPath}`);
+    await waitFor("Agile-SOFL Studio", 4e4);
+    await pinia(`pinia._s.get('app').setLanguage('en'); pinia._s.get('app').setTheme('light')`);
+    await sleep(600);
+    if (await clickIncludes("Continue without AI setup")) {
+      note("skipped AI setup");
+    } else if (await clickIncludes("暂不配置")) {
+      note("skipped AI setup from the Chinese label");
+      await pinia(`pinia._s.get('app').setLanguage('en'); pinia._s.get('app').setTheme('light')`);
+    } else {
+      note("no onboarding skip button; continuing");
+    }
+    await waitFor("New from Template", 25e3).catch(async () => {
+      const text = await ev(`(document.body.innerText || '').slice(0, 240)`);
+      note(`home not shown; visible text: ${text.replace(/\s+/g, " ")}`);
+    });
+    const opened = await ev(`(async () => {
+      const opened = await window.studio.projectOpenPath(${JSON.stringify(projectPath)})
+      if (!opened) return 'open-failed'
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
+      const ws = pinia._s.get('workspace')
+      await ws.refreshProjects()
+      const project = ws.projects.find((p) => p.rootPath === opened.root) || opened.project
+      await ws.activateProject(project, { skipConfirm: true })
+      ws.setInformalCollapsed(false)
+      ws.setStructureCollapsed(false)
+      ws.setColumnWidths([0.2, 0.58, 0.22])
+      ws.setFullscreenPanel(null)
+      const moduleName = (ws.modules || []).find((m) => m && !m.isGui && !String(m.name || '').startsWith('GUI'))
+      if (moduleName) ws.selectModule(moduleName.name)
+      ws.hybridMode = 'refine'
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const text = (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 400)
+      const main = document.querySelector('main')
+      return 'hasWorkspace=' + ws.hasWorkspace
+        + ' modules=' + (ws.modules || []).length
+        + ' mainLen=' + ((main && main.innerHTML) || '').length
+        + ' informal=' + (document.body.textContent || '').includes('Informal Specification')
+        + ' text=' + text
+    })()`);
+    note(`after open: ${opened.replace(/\s+/g, " ").slice(0, 500)}`);
+    if (opened === "open-failed") throw new Error("projectOpenPath returned null");
+    const imported = await ev(`(async () => {
+      const started = Date.now()
+      try {
+        await Promise.race([
+          import('/components/workspace/WorkspaceLayout.vue'),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('import timeout')), 120000))
+        ])
+        return 'imported ' + (Date.now() - started) + 'ms'
+      } catch (err) {
+        const message = err && err.message ? err.message : String(err)
+        return 'import failed ' + (Date.now() - started) + 'ms ' + message.slice(0, 400)
+      }
+    })()`);
+    note(imported);
+    await waitFor("Informal Specification", 18e4);
+    await waitFor("Process refinement", 2e4);
+    await pinia(`
+      const settings = pinia._s.get('settings')
+      const ws = pinia._s.get('workspace')
+      settings.setWorkspaceSplitRatio([], 0.22)
+      ws.setStructureCollapsed(false)
+      ws.setInformalCollapsed(false)
+      ws.setColumnWidths([0.18, 0.6, 0.22])
+      ws.hybridMode = 'refine'
+    `);
+    await sleep(900);
+    await shot("01-refinement");
+    await pinia(`
+      const settings = pinia._s.get('settings')
+      const ws = pinia._s.get('workspace')
+      settings.setWorkspaceSplitRatio([], 0.78)
+      settings.setWorkspaceSplitRatio([0], 0.16)
+      ws.setStructureCollapsed(true)
+      ws.setInformalCollapsed(true)
+      ws.setColumnWidths([0.14, 0.72, 0.14])
+    `);
+    await sleep(600);
+    const expandCard = (fragment) => ev(`(() => {
+        const buttons = [...document.querySelectorAll('button.agent-clarify-header')]
+        const el = buttons.find((n) => (n.textContent || '').includes(${JSON.stringify(fragment)}))
+        if (!el) return false
+        el.scrollIntoView({ block: 'center' })
+        if (el.getAttribute('aria-expanded') !== 'true') el.click()
+        return true
+      })()`);
+    const focusedAgent = await clickIncludes("digital asset");
+    if (!focusedAgent) note("initial session button not found");
+    await waitFor("How should roles", 2e4);
+    const expandedRoles = await expandCard("How should roles");
+    if (!expandedRoles) note("roles clarification header not found");
+    await sleep(700);
+    await shot("02-agent-clarification");
+    const clickedExtension = await clickIncludes("permission managemen");
+    if (!clickedExtension) note("extension session button not found");
+    await waitFor("Viewer", 2e4);
+    const expandedViewer = await expandCard("Viewer");
+    if (!expandedViewer) note("viewer clarification header not found");
+    await sleep(700);
+    await shot("03-agent-extension");
+    node_fs.writeFileSync(node_path.join(outDir, "capture-log.txt"), log2.join("\n"), "utf8");
+    note("done");
+    electron.app.exit(0);
+  } catch (err) {
+    const message = err instanceof Error ? err.stack || err.message : String(err);
+    try {
+      const text = await ev(`(document.body && document.body.innerText || '').slice(0, 800)`);
+      note(`visible: ${text.replace(/\s+/g, " ")}`);
+    } catch {
+      note("could not read visible text");
+    }
     try {
       await shot("99-capture-failed");
     } catch {
@@ -1086,12 +1275,16 @@ function parseLlmImport(raw) {
 function dumpLlmProfiles(store) {
   return JSON.stringify({ activeId: store.activeId, profiles: store.profiles }, null, 2);
 }
+function profileHasKey(profile) {
+  return Boolean(profile?.apiKey?.trim());
+}
+function savedProfileBecomesActive(options) {
+  return options.requested || !options.activeHasKey && options.savedHasKey;
+}
 function resolveActiveProfile(store) {
-  if (store.activeId) {
-    const active = store.profiles.find((p) => p.id === store.activeId);
-    if (active) return active;
-  }
-  return store.profiles.find((p) => p.apiKey.trim()) ?? store.profiles[0] ?? null;
+  const active = store.activeId ? store.profiles.find((p) => p.id === store.activeId) ?? null : null;
+  if (profileHasKey(active)) return active;
+  return store.profiles.find((p) => profileHasKey(p)) ?? active ?? store.profiles[0] ?? null;
 }
 const TEST_TIMEOUT_MS = 15e3;
 function storePath() {
@@ -1144,7 +1337,7 @@ function listLlmProfiles() {
 }
 function getActiveLlmConfig() {
   const active = resolveActiveProfile(readStore());
-  if (!active?.apiKey.trim()) return null;
+  if (!profileHasKey(active)) return null;
   return {
     apiKey: active.apiKey.trim(),
     baseUrl: normalizeBaseUrl(active.baseUrl) || envFallback().baseUrl,
@@ -1158,6 +1351,7 @@ function saveLlmProfile(draft) {
   const store = readStore();
   const existing = draft.id ? store.profiles.find((p) => p.id === draft.id) : void 0;
   const id = existing?.id ?? newProfileId();
+  const activeBefore = store.activeId ? store.profiles.find((p) => p.id === store.activeId) : void 0;
   const next = {
     id,
     name: (draft.name ?? existing?.name ?? "").trim() || (draft.model ?? existing?.model ?? "LLM"),
@@ -1170,7 +1364,13 @@ function saveLlmProfile(draft) {
   } else {
     store.profiles = [...store.profiles, next];
   }
-  if (draft.activate || !store.activeId) store.activeId = id;
+  if (savedProfileBecomesActive({
+    requested: Boolean(draft.activate),
+    activeHasKey: profileHasKey(activeBefore),
+    savedHasKey: profileHasKey(next)
+  })) {
+    store.activeId = id;
+  }
   writeStore(store);
   return { ...listLlmProfiles(), savedId: id };
 }
@@ -12793,7 +12993,6 @@ function createProjectTemplate(root, name) {
   const manifest = {
     version: "1.0",
     name,
-    guiModule: "GUI_App",
     informal,
     hybrid: [hybrid],
     gui: gui2
@@ -12818,53 +13017,13 @@ function createProjectTemplate(root, name) {
     node_path.join(root, hybrid),
     `module SYSTEM_${ident};
 end_module
-module GUI_App / ${ident};
-const
-    view_home = 0;
-    view_next = 1;
-type
-    ViewId = nat;
-var
-    current_view: ViewId;
-inv
-    current_view >= 0 and current_view <= 1;
-gui AppGui;
-  screen Home triggers OpenNext;
-  screen Next triggers OpenHome;
-end_gui;
-process OpenNext ()
-    pre
-        true
-    post
-        current_view = 1
-end_process
-process OpenHome ()
-    pre
-        true
-    post
-        current_view = 0
-end_process
-end_module
 `,
     "utf-8"
   );
   node_fs.writeFileSync(
     node_path.join(root, gui2),
     `<div class="as-app" data-app="${ident}App">
-  <section class="as-screen" id="view-home" data-screen="Home">
-    <h1 class="as-title">Home</h1>
-    <div class="as-stack as-gap-md">
-      <p class="as-muted">Application views.</p>
-      <button class="as-btn as-btn-primary" data-process="OpenNext" data-nav="Next">Open</button>
-    </div>
-  </section>
-  <section class="as-screen is-hidden" id="view-next" data-screen="Next">
-    <h1 class="as-title">Next</h1>
-    <div class="as-stack as-gap-md">
-      <p class="as-muted">Next view</p>
-      <button class="as-btn" data-process="OpenHome" data-nav="Home">Back</button>
-    </div>
-  </section>
+  <section class="as-screen" data-screen="Home"></section>
 </div>
 `,
     "utf-8"
@@ -13094,6 +13253,12 @@ function registerProjectHandlers(getWindow2) {
     const root = result.filePaths[0];
     await rememberDialogPath(root);
     if (!node_fs.existsSync(root)) return null;
+    const manifest = await loadOrCreateManifest(root);
+    const project = upsertProject({ name: manifest.name, rootPath: root });
+    return { project, root };
+  });
+  electron.ipcMain.handle("studio:project-open-path", async (_event, root) => {
+    if (!root || !node_fs.existsSync(root)) return null;
     const manifest = await loadOrCreateManifest(root);
     const project = upsertProject({ name: manifest.name, rootPath: root });
     return { project, root };
@@ -13550,9 +13715,10 @@ function getWindow() {
 }
 function createWindow() {
   const capture = process.env.STUDIO_CAPTURE === "1";
+  const paper = process.env.STUDIO_CAPTURE_KIND === "paper";
   mainWindow = new electron.BrowserWindow({
-    width: capture ? 1440 : 1280,
-    height: capture ? 900 : 800,
+    width: paper ? 1680 : capture ? 1440 : 1280,
+    height: paper ? 1050 : capture ? 900 : 800,
     minWidth: 800,
     minHeight: 500,
     frame: false,
@@ -13590,8 +13756,9 @@ function createWindow() {
     }, 2e3);
     if (process.env.STUDIO_CAPTURE === "1" && mainWindow) {
       const win = mainWindow;
-      void runCopyrightCapture(win).catch((err) => {
-        console.error("[copyright-capture]", err);
+      const run = process.env.STUDIO_CAPTURE_KIND === "paper" ? runPaperCapture : runCopyrightCapture;
+      void run(win).catch((err) => {
+        console.error("[studio-capture]", err);
         electron.app.exit(1);
       });
     }

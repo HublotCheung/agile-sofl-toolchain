@@ -95,10 +95,10 @@ function onOptionClick(opt: { id: string; label: string }): void {
 </script>
 
 <template>
-  <div class="agent-bubble mt-1 min-w-0 max-w-full overflow-hidden rounded-lg bg-surface-raised">
+  <div class="agent-bubble agent-clarify mt-1 min-w-0 max-w-full overflow-hidden rounded-lg bg-surface-raised">
     <button
       type="button"
-      class="flex w-full items-start gap-2 px-2 py-1 text-left hover:bg-surface-overlay"
+      class="agent-clarify-header flex w-full items-start gap-2 px-2 py-1 text-left hover:bg-surface-overlay"
       :aria-expanded="expanded"
       :title="answer ? `${question} — ${answer}` : question"
       @click="emit('toggle')"
@@ -125,7 +125,7 @@ function onOptionClick(opt: { id: string; label: string }): void {
           class="max-w-full min-w-0 truncate rounded-md border px-2 py-0.5 text-left text-[12px] leading-snug transition-colors"
           :class="
             isChosen(opt)
-              ? 'border-accent bg-accent/10 text-content-primary'
+              ? 'agent-clarify-option-on border-accent bg-accent/10 text-content-primary'
               : 'border-border-subtle text-content-secondary hover:border-accent/50 hover:text-content-primary'
           "
           :title="opt.label"
@@ -146,7 +146,7 @@ function onOptionClick(opt: { id: string; label: string }): void {
       </div>
       <p
         v-if="!pending && answer"
-        class="studio-text-selectable mt-1.5 min-w-0 truncate rounded-md bg-surface-base px-2 py-1 text-[12px] text-content-secondary"
+        class="agent-clarify-answer studio-text-selectable mt-1.5 min-w-0 truncate rounded-md bg-surface-base px-2 py-1 text-[12px] text-content-secondary"
         :title="answer"
       >
         {{ $t('agent.yourAnswer') }}：{{ answer }}

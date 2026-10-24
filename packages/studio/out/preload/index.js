@@ -108,6 +108,7 @@ const studio = {
   projectCreate: (name) => electron.ipcRenderer.invoke("studio:project-create", name),
   projectCreateFromTemplate: (name, templateId) => electron.ipcRenderer.invoke("studio:project-create-from-template", name, templateId),
   projectOpenFolder: () => electron.ipcRenderer.invoke("studio:project-open-folder"),
+  projectOpenPath: (root) => electron.ipcRenderer.invoke("studio:project-open-path", root),
   projectRemove: (projectId) => electron.ipcRenderer.invoke("studio:project-remove", projectId),
   projectRename: (projectId, name) => electron.ipcRenderer.invoke("studio:project-rename", projectId, name),
   projectTouch: (projectId) => electron.ipcRenderer.invoke("studio:project-touch", projectId),

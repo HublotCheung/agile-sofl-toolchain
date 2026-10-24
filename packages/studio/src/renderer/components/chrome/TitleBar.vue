@@ -13,7 +13,7 @@ const isDarwin = computed(() => app.platform === 'darwin')
 
 <template>
   <header
-    class="titlebar-drag flex h-[35px] shrink-0 items-center border-b border-border-subtle bg-surface-raised select-none"
+    class="titlebar-drag flex h-[35px] shrink-0 items-center border-b border-titlebar-border bg-titlebar select-none"
   >
     <div
       class="titlebar-no-drag flex items-center gap-2"

@@ -14,6 +14,7 @@ import { app, ipcMain, BrowserWindow } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { runCopyrightCapture } from './services/copyrightCapture'
+import { runPaperCapture } from './services/paperCapture'
 
 if (process.env.STUDIO_CAPTURE === '1' && process.env.STUDIO_CAPTURE_USER_DATA) {
   mkdirSync(process.env.STUDIO_CAPTURE_USER_DATA, { recursive: true })
@@ -58,9 +59,10 @@ function getWindow(): BrowserWindow | null {
 
 function createWindow(): void {
   const capture = process.env.STUDIO_CAPTURE === '1'
+  const paper = process.env.STUDIO_CAPTURE_KIND === 'paper'
   mainWindow = new BrowserWindow({
-    width: capture ? 1440 : 1280,
-    height: capture ? 900 : 800,
+    width: paper ? 1680 : capture ? 1440 : 1280,
+    height: paper ? 1050 : capture ? 900 : 800,
     minWidth: 800,
     minHeight: 500,
     frame: false,
@@ -105,8 +107,9 @@ function createWindow(): void {
     }, 2000)
     if (process.env.STUDIO_CAPTURE === '1' && mainWindow) {
       const win = mainWindow
-      void runCopyrightCapture(win).catch((err) => {
-        console.error('[copyright-capture]', err)
+      const run = process.env.STUDIO_CAPTURE_KIND === 'paper' ? runPaperCapture : runCopyrightCapture
+      void run(win).catch((err) => {
+        console.error('[studio-capture]', err)
         app.exit(1)
       })
     }

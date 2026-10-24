@@ -49,6 +49,9 @@ export default defineConfig({
     root: resolve(__dirname, 'src/renderer'),
     publicDir: resolve(__dirname, 'public'),
     server: {
+      // A production preview inlines Monaco as a data URL and the workspace never mounts.
+      // Dev keeps the real Monaco URL. Capture turns HMR off so a save cannot wipe the window.
+      hmr: process.env.STUDIO_CAPTURE === '1' ? false : undefined,
       sourcemapIgnoreList(sourcePath) {
         return sourcePath.replace(/\\/g, '/').includes('monaco-editor')
       }

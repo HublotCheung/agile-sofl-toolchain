@@ -41,6 +41,13 @@ module.exports = {
           DEFAULT: 'var(--danger)',
           fg: 'var(--danger-fg)'
         },
+        titlebar: {
+          DEFAULT: 'var(--titlebar-bg)',
+          fg: 'var(--titlebar-fg)',
+          strong: 'var(--titlebar-fg-strong)',
+          hover: 'var(--titlebar-hover)',
+          border: 'var(--titlebar-border)'
+        },
         kind: {
           type: 'var(--kind-type)',
           var: 'var(--kind-var)'

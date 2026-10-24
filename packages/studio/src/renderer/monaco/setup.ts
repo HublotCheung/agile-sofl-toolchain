@@ -7,20 +7,24 @@ import jsonWorker from './workers/json.worker.entry?worker'
 import cssWorker from './workers/css.worker.entry?worker'
 import tsWorker from './workers/ts.worker.entry?worker'
 import {
+  agileSoflContrastFieldTheme,
+  agileSoflContrastTheme,
   agileSoflDarkFieldTheme,
   agileSoflDarkTheme,
   agileSoflLightFieldTheme,
   agileSoflLightTheme,
-  semanticTokenRulesForTheme
+  semanticTokenRulesForTone,
+  type MonacoTone,
+  type StudioMonacoTheme
 } from './themes'
 
 function withSemanticRules(
   theme: typeof agileSoflLightTheme,
-  isDark: boolean
+  tone: MonacoTone
 ): typeof agileSoflLightTheme {
   return {
     ...theme,
-    rules: [...theme.rules, ...semanticTokenRulesForTheme(isDark)]
+    rules: [...theme.rules, ...semanticTokenRulesForTone(tone)]
   }
 }
 
@@ -52,10 +56,12 @@ export function initMonacoBase(): void {
   if (initialized) return
   initialized = true
 
-  monaco.editor.defineTheme('agile-sofl-light', withSemanticRules(agileSoflLightTheme, false))
-  monaco.editor.defineTheme('agile-sofl-dark', withSemanticRules(agileSoflDarkTheme, true))
-  monaco.editor.defineTheme('agile-sofl-light-field', withSemanticRules(agileSoflLightFieldTheme, false))
-  monaco.editor.defineTheme('agile-sofl-dark-field', withSemanticRules(agileSoflDarkFieldTheme, true))
+  monaco.editor.defineTheme('agile-sofl-light', withSemanticRules(agileSoflLightTheme, 'light'))
+  monaco.editor.defineTheme('agile-sofl-dark', withSemanticRules(agileSoflDarkTheme, 'dark'))
+  monaco.editor.defineTheme('agile-sofl-contrast', withSemanticRules(agileSoflContrastTheme, 'contrast'))
+  monaco.editor.defineTheme('agile-sofl-light-field', withSemanticRules(agileSoflLightFieldTheme, 'light'))
+  monaco.editor.defineTheme('agile-sofl-dark-field', withSemanticRules(agileSoflDarkFieldTheme, 'dark'))
+  monaco.editor.defineTheme('agile-sofl-contrast-field', withSemanticRules(agileSoflContrastFieldTheme, 'contrast'))
 
   monaco.languages.register({ id: 'agile-sofl', extensions: ['.asfl'], aliases: ['Agile-SOFL', 'ASFL'] })
   monaco.languages.register({ id: 'agile-aspec', extensions: ['.aspec'], aliases: ['Agile-ASPEC', 'Informal Spec'] })
@@ -105,7 +111,7 @@ export function initMonacoBase(): void {
   })
 }
 
-export function applyMonacoTheme(themeName: 'agile-sofl-light' | 'agile-sofl-dark'): void {
+export function applyMonacoTheme(themeName: StudioMonacoTheme): void {
   monaco.editor.setTheme(themeName)
 }
 

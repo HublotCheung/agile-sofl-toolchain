@@ -29,6 +29,7 @@ declare module 'vue-i18n' {
     'menu.view.themeLight': string
     'menu.view.themeDark': string
     'menu.view.themeSystem': string
+    'menu.view.themeContrast': string
     'menu.view.languageZh': string
     'menu.view.languageEn': string
     'menu.settings': string

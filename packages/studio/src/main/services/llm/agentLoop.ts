@@ -341,6 +341,7 @@ ${toolLines.join('\n')}
 Agile-SOFL conventions:
 - There is exactly one system module. Name it SYSTEM_<SystemName> after the whole product (e.g. SYSTEM_FoodDelivery). It is the root; every other module is a child: module Auth / FoodDelivery;
 - SYSTEM_ is listed first in the .asfl file. Do not treat GUI_App or a feature module as the system module.
+- A GUI module is a Hybrid child (module GUI_App / System;), separate from gui.html screens. If the inventory has none, ask_clarification whether to add an empty GUI_App before any GUI HTML work, unless the active generation parameters already set GUI on (add the empty module) or off (skip and do not ask). Never add sample OpenNext/OpenHome processes.
 - Processes without known ports use signature (). Inventing (x: nat) ok: nat is wrong.
 - There is no implication operator: write not A or B instead. Process logic is written as FSF: FSF : T1 && D1 || T2 && D2 || … || others && Dn.
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.

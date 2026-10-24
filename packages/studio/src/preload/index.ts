@@ -212,6 +212,11 @@ const studio = {
       project: IndexedProject
       root: string
     } | null>,
+  projectOpenPath: (root: string) =>
+    ipcRenderer.invoke('studio:project-open-path', root) as Promise<{
+      project: IndexedProject
+      root: string
+    } | null>,
   projectRemove: (projectId: string) =>
     ipcRenderer.invoke('studio:project-remove', projectId) as Promise<boolean>,
   projectRename: (projectId: string, name: string) =>

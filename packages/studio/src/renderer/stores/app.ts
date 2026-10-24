@@ -1,44 +1,49 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { setLocale, type Locale } from '../i18n'
+import {
+  applyThemeMode,
+  monacoThemeId,
+  persistTheme,
+  readStoredTheme,
+  resolveDark,
+  type ThemeMode
+} from '../lib/themeMode'
 
-export type ThemeMode = 'light' | 'dark' | 'system'
+export type { ThemeMode }
 
-function resolveDark(mode: ThemeMode): boolean {
-  if (mode === 'dark') return true
-  if (mode === 'light') return false
+function prefersDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
 let themeClassReady = false
 
-function applyThemeClass(dark: boolean): void {
-  document.documentElement.classList.toggle('dark', dark)
+function applyThemeClass(mode: ThemeMode): boolean {
+  const dark = applyThemeMode(mode, document.documentElement, prefersDark())
   if (!themeClassReady) {
     themeClassReady = true
-    return
+    return dark
   }
-  const theme = dark ? 'agile-sofl-dark' : 'agile-sofl-light'
+  const theme = monacoThemeId(mode, prefersDark())
   void import('../monaco/setup').then(({ applyMonacoTheme }) => applyMonacoTheme(theme))
+  return dark
 }
 
-const savedTheme = (localStorage.getItem('studio-theme') as ThemeMode | null) ?? 'system'
+const savedTheme = readStoredTheme()
 
 export const useAppStore = defineStore('app', () => {
   const theme = ref<ThemeMode>(savedTheme)
-  const isDark = ref(resolveDark(savedTheme))
+  const isDark = ref(resolveDark(savedTheme, prefersDark()))
   const platform = ref('win32')
   const isMaximized = ref(false)
 
   function paint(mode: ThemeMode): void {
-    const dark = resolveDark(mode)
-    isDark.value = dark
-    applyThemeClass(dark)
+    isDark.value = applyThemeClass(mode)
   }
 
   function setTheme(mode: ThemeMode): void {
     theme.value = mode
-    localStorage.setItem('studio-theme', mode)
+    persistTheme(mode)
     paint(mode)
   }
 

@@ -106,6 +106,13 @@ export function registerProjectHandlers(getWindow: () => BrowserWindow | null): 
     return { project, root }
   })
 
+  ipcMain.handle('studio:project-open-path', async (_event, root: string) => {
+    if (!root || !existsSync(root)) return null
+    const manifest = await loadOrCreateManifest(root)
+    const project = upsertProject({ name: manifest.name, rootPath: root })
+    return { project, root }
+  })
+
   ipcMain.handle('studio:project-touch', (_event, projectId: string) => {
     touchProject(projectId)
     return true

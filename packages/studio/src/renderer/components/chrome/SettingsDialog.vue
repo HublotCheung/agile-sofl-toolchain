@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppStore, type ThemeMode } from '../../stores/app'
+import { useAppStore } from '../../stores/app'
 import { useSettingsStore } from '../../stores/settings'
 import { ACCENT_PRESETS, normalizeHex, type AccentId, type UiZoom } from '../../lib/appearance'
 import SegmentedSwitch from '../ui/SegmentedSwitch.vue'
@@ -42,6 +42,7 @@ const saving = ref(false)
 const themeOptions = computed(() => [
   { id: 'light', label: t('settings.themeLight') },
   { id: 'dark', label: t('settings.themeDark') },
+  { id: 'contrast', label: t('settings.themeContrast') },
   { id: 'system', label: t('settings.themeSystem') }
 ])
 
@@ -114,7 +115,7 @@ watch(
 )
 
 function onTheme(id: string): void {
-  if (id === 'light' || id === 'dark' || id === 'system') app.setTheme(id as ThemeMode)
+  if (id === 'light' || id === 'dark' || id === 'contrast' || id === 'system') app.setTheme(id)
 }
 
 function onZoom(id: string): void {
