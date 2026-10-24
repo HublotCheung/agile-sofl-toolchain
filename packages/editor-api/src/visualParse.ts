@@ -7,7 +7,8 @@ import {
   checkDataRefine,
   deriveFsf,
   printType,
-  type ProgramNode
+  type ProgramNode,
+  type Span
 } from '@agile-sofl/parser'
 import { buildModuleGraph } from './moduleGraph.js'
 import { buildAllCdfdGraphs, type CdfdGraph } from './cdfdGraph.js'
@@ -164,7 +165,7 @@ function processFormalization(p: ProgramNode['modules'][0]['processes'][0]): {
   }
 }
 
-function clauseSource(source: string, span: { start: number; end: number }, keyword: string): string {
+function clauseSource(source: string, span: Span, keyword: string): string {
   const text = sliceText(source, span).replace(/\s+/g, ' ').trim()
   return text.replace(new RegExp(`^${keyword}\\s+`, 'i'), '')
 }

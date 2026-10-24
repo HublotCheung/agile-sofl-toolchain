@@ -248,7 +248,7 @@ function systemPrompt(ctx: AgentTurnContext, permissions: AgentSpecPermissions):
   if (permissions.hybrid.write) {
     toolLines.push('- propose_hybrid_changes: incremental Hybrid CRUD (preferred)')
     toolLines.push(
-      '- propose_refinement_step: FormalizePredicate / DecomposeProcess / SetCdfd / DeclareAtomic / IntroduceRetrieve / DischargeDataObligation / ClassifyGrain / ResolveVariation. A module without cdfd is valid; do not treat ASFL_CDFD_001 as a syntax error. Grain ambiguity does not drop if you only rewrite pre/post.'
+      '- propose_refinement_step: FormalizePredicate / DecomposeProcess / SetCdfd / DeclareAtomic / IntroduceRetrieve / DischargeDataObligation / ClassifyGrain / ResolveVariation. A module without cdfd is valid; do not treat ASFL_CDFD_001 as a syntax error. Grain ambiguity does not drop if you only rewrite pre/post. There is no `atomic` keyword in .asfl — use DeclareAtomic (journal in .agile-sofl/refinement-log.jsonl), then read_refinement_state to verify undeclaredAtomic.'
     )
   }
   if (permissions.hybrid.write || permissions.informal.write) {

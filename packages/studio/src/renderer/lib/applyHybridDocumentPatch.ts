@@ -42,13 +42,14 @@ export async function applyHybridDocumentPatch(
         projectRoot: root,
         step: stepOp
       })
-      if (result.error && result.source === hybridTab.content) {
+      if (result.error && result.source === hybridTab.content && !result.journalApplied) {
         return {
           ok: true,
           applied: false,
           warnings: result.warnings ?? [result.error]
         }
       }
+      const journalApplied = Boolean(result.journalApplied)
       const committed = await commitHybrid(
         hybridTab,
         result.source,
@@ -57,8 +58,12 @@ export async function applyHybridDocumentPatch(
         beforeText,
         result.warnings ?? (result.error ? [result.error] : undefined)
       )
-      if (committed.ok) notifyRefinementChanged()
-      return { ...committed, repairNotes: committed.repairNotes ?? result.repairNotes }
+      if (committed.ok && (committed.applied || journalApplied)) notifyRefinementChanged()
+      return {
+        ...committed,
+        applied: committed.applied || journalApplied,
+        repairNotes: committed.repairNotes ?? result.repairNotes
+      }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
