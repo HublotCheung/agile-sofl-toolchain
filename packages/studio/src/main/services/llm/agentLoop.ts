@@ -1,4 +1,5 @@
 import { compactDiagnosticPayload } from './diagnosticPayload'
+import { guiModuleRequiredError, missingHybridGuiModule } from './guiModuleGate'
 import { informalEntities } from '../traceEngine'
 import { chatEcnuStream, isChatAborted, type ChatMessage, type ChatStreamDelta } from './chatEcnu'
 import { getEcnuConfig } from './profiles'
@@ -341,7 +342,7 @@ ${toolLines.join('\n')}
 Agile-SOFL conventions:
 - There is exactly one system module. Name it SYSTEM_<SystemName> after the whole product (e.g. SYSTEM_FoodDelivery). It is the root; every other module is a child: module Auth / FoodDelivery;
 - SYSTEM_ is listed first in the .asfl file. Do not treat GUI_App or a feature module as the system module.
-- A GUI module is a Hybrid child (module GUI_App / System;), separate from gui.html screens. If the inventory has none, ask_clarification whether to add an empty GUI_App before any GUI HTML work, unless the active generation parameters already set GUI on (add the empty module) or off (skip and do not ask). Never add sample OpenNext/OpenHome processes.
+- A GUI module is a Hybrid child (module GUI_App / System;). gui.html is the prototype, not the module. If the user asks for a GUI module or prototype and none exists, add empty GUI_App with propose_hybrid_changes before any screen. propose_gui_changes is rejected until that module exists. Do not ask again after the user already requested it. Never add sample OpenNext/OpenHome processes. Generation parameter GUI=false is the only case that skips the module.
 - Processes without known ports use signature (). Inventing (x: nat) ok: nat is wrong.
 - There is no implication operator: write not A or B instead. Process logic is written as FSF: FSF : T1 && D1 || T2 && D2 || … || others && Dn.
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.
@@ -946,6 +947,21 @@ export async function runAgentTurn(
                 timestamp: new Date().toISOString()
               })
               live.content = live.content || 'Source edit needs an explicit target.'
+              markCallStatus(live, call.id, 'error', sink)
+              continue
+            }
+          }
+          if (target === 'gui') {
+            const gate = missingHybridGuiModule(ctx.hybridAsfl)
+            if (gate.missing) {
+              const error = guiModuleRequiredError(gate.parentId)
+              session.messages.push({
+                id: call.id,
+                role: 'tool',
+                content: JSON.stringify({ ok: false, error, next: error }),
+                timestamp: new Date().toISOString()
+              })
+              live.content = live.content || error
               markCallStatus(live, call.id, 'error', sink)
               continue
             }

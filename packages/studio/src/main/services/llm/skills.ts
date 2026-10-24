@@ -13,7 +13,7 @@ export const AGENT_SKILLS: Array<{ id: AgentSkillId; name: string; prompt: strin
     id: 'requirement-discovery',
     name: 'Requirement Discovery',
     prompt:
-      'Discover Functions, Data Resources, and Constraints from the user\'s natural language. Do not dump a full specification. Summarize candidates, then ask clarifying questions, then propose structured propose_changes patches. After each applied write, read_specification and continue until the inventory is complete, then summarize. If CRUD cannot express a fix, read view=source and propose_source_edit. The full journey is Informal → Hybrid+GUI → dual-line refinement until the refinement digest is unambiguous. If Hybrid already exists with remaining gaps, after Informal work call read_refinement_state and invite the next refinement slice — do not stop as if the specification were finished.'
+      'Discover Functions, Data Resources, and Constraints from the user\'s natural language. Do not dump a full specification. Summarize candidates, then ask clarifying questions, then propose structured propose_changes patches. After each applied write, read_specification and continue until the inventory is complete, then summarize. If CRUD cannot express a fix, read view=source and propose_source_edit. The full journey is Informal → Hybrid+GUI → dual-line refinement until the refinement digest is unambiguous. If Hybrid already exists with remaining gaps, after Informal work call read_refinement_state and invite the next refinement slice — do not stop as if the specification were finished. When the user asks for a GUI module or prototype, gui.html is not the module: first propose_hybrid_changes add kind=module name=GUI_App under the SYSTEM_ module, then propose_gui_changes. A GUI HTML call is rejected until GUI_App exists.'
   },
   {
     id: 'requirement-clarification',
@@ -354,7 +354,7 @@ export const AGENT_TOOLS = [
     function: {
       name: 'propose_gui_changes',
       description:
-        'Propose a structured GUI HTML patch. ONE screen per call (replace-screen-html or add-screen) with a complete inner layout (navbar/sidebar/hero/cards/forms/tables), not a single button and not every screen at once. Ops: add-screen (optional html), remove-screen, add-widget, replace-html, replace-screen-html, insert-html, patch-node, remove-node. Whitelist HTML5 tags; any as-* class is allowed. Bind with data-process / data-bind / data-nav. Inline <script type="text/as-logic"> is allowed for calculations and animations and runs in a sandbox. Also allowed: onclick, oninput, onchange. Never emit <script src>, style=, href, or src.',
+        'Propose a structured GUI HTML patch for the prototype only. This does not create the Hybrid GUI module. If no module GUI_App exists, this call is rejected — add that empty module with propose_hybrid_changes first. ONE screen per call (replace-screen-html or add-screen) with a complete inner layout (navbar/sidebar/hero/cards/forms/tables), not a single button and not every screen at once. Ops: add-screen (optional html), remove-screen, add-widget, replace-html, replace-screen-html, insert-html, patch-node, remove-node. Whitelist HTML5 tags; any as-* class is allowed. Bind with data-process / data-bind / data-nav. Inline <script type="text/as-logic"> is allowed for calculations and animations and runs in a sandbox. Also allowed: onclick, oninput, onchange. Never emit <script src>, style=, href, or src.',
       parameters: {
         type: 'object',
         properties: {
