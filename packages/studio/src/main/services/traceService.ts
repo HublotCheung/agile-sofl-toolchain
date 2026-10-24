@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { cachedTraceCompletion, listTraceProviders } from './traceProviders'
 import { validateEvidence, mergeTraceGraphs } from '../../shared/traceAdvanced'
 import { refreshTrace, informalEntities, hybridEntities } from './traceEngine'
-import { readTrace, writeTrace, traceStoragePath, hydrateTracePair, validateTrace } from './traceRepository'
+import { readTrace, writeTrace, traceStoragePath, hydrateTracePair, validateTrace, sanitizeTraceDocument } from './traceRepository'
 import { acceptHybridWrite } from '../../shared/asflRepair'
 import { applyTraceReplacements, linkBaseline, linkState, sameBaseline,
   type TracePrepared, type TraceDocument, type TraceEntity, type TracePair, type TraceProposal, type TraceReplacement, type TraceIdentityHint } from '../../shared/traceability'
@@ -56,7 +56,7 @@ export function registerTraceHandlers(): void {
   ipcMain.handle('studio:trace-providers',()=>listTraceProviders())
   ipcMain.handle('studio:trace-structure-preview',(_event,pair:TracePair,ids:string[],parts:Array<{title:string;description:string}>)=>{pairCheck(pair);return previewTraceStructure(pair,refreshTrace(readTrace(pair),pair),ids,parts)})
   ipcMain.handle('studio:trace-structure-prepare',(_event,pair:TracePair,id:string,plan:TraceRebindPlan)=>{pairCheck(pair);return prepareTraceStructure(pair,refreshTrace(readTrace(pair),pair),id,plan)})
-  ipcMain.handle('studio:trace-stage',(_event,pair:TracePair,document:TraceDocument,changes:NonNullable<TracePrepared['changes']>)=>{pairCheck(pair);validateTrace(document);return stageTraceTransaction(pair,document,changes).id})
+  ipcMain.handle('studio:trace-stage',(_event,pair:TracePair,document:TraceDocument,changes:NonNullable<TracePrepared['changes']>)=>{pairCheck(pair);const clean=sanitizeTraceDocument(document);validateTrace(clean);return stageTraceTransaction(pair,clean,changes).id})
   ipcMain.handle('studio:trace-finish',(_event,pair:TracePair,id:string,state:'buffers-applied'|'discarded')=>{pairCheck(pair);updateTraceTransaction(pair.root,id,state)})
   ipcMain.handle('studio:trace-transactions',(_event,pair:TracePair)=>{pairCheck(pair);return pendingTraceTransactions(pair)})
   ipcMain.handle('studio:trace-restore',(_event,pair:TracePair,id:string,choice:'restore'|'discard')=>{pairCheck(pair);return recoverTraceJournal(pair,id,choice)})

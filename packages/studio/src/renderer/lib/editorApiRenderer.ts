@@ -3,7 +3,13 @@
  * Vite aliases `@agile-sofl/editor-api` to this module in the renderer bundle.
  */
 export { namesEqual, canonicalModuleName, labelsMatch, uniqueSlug } from '../../../../editor-api/src/hybridIds.js'
-export { countBySeverity, mergeDiagnostics, adjustFsfDiagnosticSeverity } from '../../../../editor-api/src/mergeDiagnostics.js'
+export {
+  countBySeverity,
+  mergeDiagnostics,
+  adjustFsfDiagnosticSeverity,
+  adjustRefinementDiagnosticSeverity,
+  hasBlockingHybridDiagnostics
+} from '../../../../editor-api/src/mergeDiagnostics.js'
 export { filterDiagnosticsBySelection } from '../../../../editor-api/src/filterDiagnostics.js'
 export { buildModuleGraphLayout, decorateProcessLabel } from '../../../../editor-api/src/moduleGraphLayout.js'
 export { layoutCdfdGraph } from '../../../../editor-api/src/cdfdLayout.js'

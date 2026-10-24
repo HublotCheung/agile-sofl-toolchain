@@ -63,6 +63,11 @@ export function formToFsfModel(form: FunctionalScenarioForm, processNode: Proces
 }
 
 export function buildFsfModel(processNode: ProcessNode, source: string): FsfModelDto | null {
+  // Inventory and editors must show the text that is actually in the file.
+  // deriveFsf rewrites predicates (and joins pre/post), which made source edits miss.
+  if (processNode.body?.fsf) {
+    return buildFsfModelFromSpec(processNode.name, processNode.body.fsf, source)
+  }
   const derived = deriveFsf(processNode)
   if (derived) return formToFsfModel(formWithSourceText(derived, processNode, source), processNode)
   return null

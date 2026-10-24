@@ -29,7 +29,9 @@ export function writeModuleArtifacts(filePath: string, content: string): DualSav
   } catch (e) {
     return { written: [], skipped: `parse failed: ${String(e)}` }
   }
-  if (!ast || ast.type !== 'program' || ast.modules.length === 0) return { written: [], skipped: 'no parsable modules' }
+  if (!ast || ast.type !== 'program' || ast.modules.length === 0) {
+    return { written: [], skipped: 'no parsable modules' }
+  }
   const dir = moduleArtifactDir(filePath)
   mkdirSync(dir, { recursive: true })
   const written: string[] = []

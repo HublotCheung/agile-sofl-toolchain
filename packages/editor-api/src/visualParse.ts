@@ -6,7 +6,6 @@ import {
   checkCdfd,
   checkDataRefine,
   deriveFsf,
-  printConditionText,
   printType,
   type ProgramNode
 } from '@agile-sofl/parser'
@@ -74,6 +73,8 @@ export type VisualModelResult = {
       exceptionalCount: number
       formalizationStatus: FormalizationStatus
       fsfSource?: 'derived' | 'editor-internal-dsl'
+      /** Verbatim FSF block from the source, for agent reads and source edits. */
+      fsfText?: string
     }>
     functions: Array<{
       name: string
@@ -161,6 +162,11 @@ function processFormalization(p: ProgramNode['modules'][0]['processes'][0]): {
     exceptionalCount: form?.exceptionalScenarios.length ?? 0,
     fsfSource: form?.source
   }
+}
+
+function clauseSource(source: string, span: { start: number; end: number }, keyword: string): string {
+  const text = sliceText(source, span).replace(/\s+/g, ' ').trim()
+  return text.replace(new RegExp(`^${keyword}\\s+`, 'i'), '')
 }
 
 function typeFields(t: ProgramNode['modules'][0]['types'][0]): Array<{ name: string; type: string }> | undefined {
@@ -280,15 +286,16 @@ export function buildVisualModelTolerant(source: string): VisualModelResult {
           type: e.typeExpr ? sliceText(source, e.typeExpr.span).trim() : undefined
         })),
         fsfFormal: form.fsfFormal,
-        pre: p.body?.pre ? printConditionText(p.body.pre) : '',
-        post: p.body?.post ? printConditionText(p.body.post) : '',
+        pre: p.body?.pre ? clauseSource(source, p.body.pre.span, 'pre') : '',
+        post: p.body?.post ? clauseSource(source, p.body.post.span, 'post') : '',
         hasPre: Boolean(p.body?.pre),
         hasPost: Boolean(p.body?.post),
         scenarioCount: form.scenarioCount,
         exceptionalCount: form.exceptionalCount,
         formalizationStatus: form.formalizationStatus,
-        fsfSource: form.fsfSource
-      }
+        fsfSource: form.fsfSource,
+        fsfText: p.body?.fsf ? sliceText(source, p.body.fsf.span).replace(/\s+/g, ' ').trim() : ''
+        }
       }),
       functions: mod.functions.map((f) => ({
         name: f.name,

@@ -41,8 +41,9 @@ export const useTraceabilityStore = defineStore('traceability', () => {
     const informal = workspace.informalTab, hybrid = workspace.hybridTab
     if (!root || !informal?.filePath || !hybrid?.filePath) return null
     const sources=new Map<string,{path:string;side:TraceSide;content?:string}>()
-    for(const file of workspace.scan?.files??[]) if(['aspec','asfl'].includes(file.kind))sources.set(file.path.toLowerCase(),{path:file.path,side:file.kind==='aspec'?'informal':'hybrid'})
-    for(const tab of documents.documentTabs) if(tab.filePath&&fileBelongsToRoot(tab.filePath,root)&&['aspec','asfl'].includes(tab.documentKind))sources.set(tab.filePath.toLowerCase(),{path:tab.filePath,side:tab.documentKind==='aspec'?'informal':'hybrid',content:tab.content})
+    const moduleSlice = (path: string) => /[/\\]\.agile-sofl[/\\]modules[/\\]/i.test(path)
+    for(const file of workspace.scan?.files??[]) if(['aspec','asfl'].includes(file.kind) && !moduleSlice(file.path))sources.set(file.path.toLowerCase(),{path:file.path,side:file.kind==='aspec'?'informal':'hybrid'})
+    for(const tab of documents.documentTabs) if(tab.filePath&&!moduleSlice(tab.filePath)&&fileBelongsToRoot(tab.filePath,root)&&['aspec','asfl'].includes(tab.documentKind))sources.set(tab.filePath.toLowerCase(),{path:tab.filePath,side:tab.documentKind==='aspec'?'informal':'hybrid',content:tab.content})
     return { root, informalPath: informal.filePath, hybridPath: hybrid.filePath, informal: informal.content, hybrid: hybrid.content,documents:[...sources.values()] }
   })
   const keyOf = (p: TracePair) => JSON.stringify([p.root.toLowerCase()])
@@ -105,7 +106,15 @@ export const useTraceabilityStore = defineStore('traceability', () => {
         // Registry snapshots persist separately from the last-confirmed link baselines.
         const changed = activeKey !== keyOf(p) || JSON.stringify(result.document.entities) !== JSON.stringify(document.value.entities)
           || JSON.stringify(result.document.links) !== JSON.stringify(document.value.links) || JSON.stringify(result.document.files)!==JSON.stringify(document.value.files)
-        const saved = changed ? await window.studio!.traceSave(p, clone(result.document), result.document.revision) : result.document
+        let saved = result.document
+        if (changed) {
+          try {
+            saved = await window.studio!.traceSave(p, clone(result.document), result.document.revision)
+          } catch (e) {
+            warnings.value = [`Trace metadata was not saved: ${e instanceof Error ? e.message : String(e)}`]
+            saved = result.document
+          }
+        }
         assertPair(p)
         renameHints.splice(0, hints.length)
         activeKey = keyOf(p); document.value = saved; warnings.value = result.warnings
@@ -280,7 +289,9 @@ export const useTraceabilityStore = defineStore('traceability', () => {
   async function applyGeneratedContent(beforeText: string, next: string, links: GeneratedTraceLink[]): Promise<{ warnings: string[] }> {
     await history.flushRegistered()
     if (!pair.value) throw new Error('Open and save the project Informal and Hybrid files before applying modeled nodes.')
-    if (pair.value.hybrid !== beforeText) throw new Error('The specification changed. Generate a new preview.')
+    const liveHybrid = workspace.hybridTab?.content
+    const textAlreadyCommitted = liveHybrid === next
+    if (liveHybrid !== beforeText && !textAlreadyCommitted) throw new Error('The specification changed. Generate a new preview.')
     await refreshNow()
     const p = clone(pair.value!), before = clone(document.value)
     const nextPair = {...p,hybrid:next,documents:p.documents?.map(d=>filePathsEqual(absolutePath(d.path),p.hybridPath)?{...d,content:next}:d)}
@@ -302,16 +313,17 @@ export const useTraceabilityStore = defineStore('traceability', () => {
       await serial(async()=>{
         try {
           assertPair(p)
-          if (workspace.hybridTab?.content !== beforeText) throw new Error('Documents changed while processing. Refresh and try again.')
+          if (workspace.hybridTab?.content !== beforeText && workspace.hybridTab?.content !== next) throw new Error('Documents changed while processing. Refresh and try again.')
           const saved = await window.studio!.traceSave(p,result.document,before.revision)
           try { assertPair(p) } catch(e) { document.value=await window.studio!.traceSave(p,before,saved.revision);throw e }
-          if (workspace.hybridTab?.content !== beforeText) {
+          if (workspace.hybridTab?.content !== beforeText && workspace.hybridTab?.content !== next) {
             document.value=await window.studio!.traceSave(p,before,saved.revision)
             throw new Error('Documents changed while processing. Refresh and try again.')
           }
-          documents.setContent(tab.id,next); document.value=saved
+          if (workspace.hybridTab?.content !== next) documents.setContent(tab.id,next)
+          document.value=saved
           if(journalId)history.registerEffect('trace-transaction:'+journalId,async state=>{await window.studio!.traceFinish(p,journalId,state as 'buffers-applied'|'discarded')})
-          history.commit({kind:'traceability',label:'Apply modeling with source bindings',immediate:true,mutations:[{tabId:tab.id,filePath:p.hybridPath,before:beforeText,after:next}],effects:[{key:effectKey(p),before:JSON.stringify(before),after:JSON.stringify(saved)},...(journalId?[{key:'trace-transaction:'+journalId,before:'discarded',after:'buffers-applied'}]:[])]})
+          if (!textAlreadyCommitted) history.commit({kind:'traceability',label:'Apply modeling with source bindings',immediate:true,mutations:[{tabId:tab.id,filePath:p.hybridPath,before:beforeText,after:next}],effects:[{key:effectKey(p),before:JSON.stringify(before),after:JSON.stringify(saved)},...(journalId?[{key:'trace-transaction:'+journalId,before:'discarded',after:'buffers-applied'}]:[])]})
         } catch(e) { if(journalId)await window.studio!.traceFinish(p,journalId,'discarded');throw e }
       })
       if(journalId)await window.studio!.traceFinish(p,journalId,'buffers-applied').catch(e=>{warningsOut.push(String(e))})

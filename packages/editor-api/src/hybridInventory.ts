@@ -150,6 +150,7 @@ function formatModuleInventory(model: VisualModelResult, mod: VisualModelResult[
     if (proc.signature) lines.push(`  signature: ${clip(proc.signature, 200)}`)
     if (proc.pre) lines.push(`  pre: ${clip(proc.pre, 200)}`)
     if (proc.post) lines.push(`  post: ${clip(proc.post, 200)}`)
+    if (proc.fsfText) lines.push(`  fsf: ${clip(proc.fsfText, 500)}`)
     if (proc.comment) lines.push(`  comment: ${clip(proc.comment, 200)}`)
     const scenarios = processScenarios(model.fsfModels, mod.name, proc.name)
     const used = new Set<string>()

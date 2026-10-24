@@ -97,30 +97,21 @@ async function commitHybrid(
   const warnings = [...(softWarnings ?? []), ...(gated.warnings ?? [])].filter(Boolean)
   const applied = gated.content !== hybridTab.content
   if (applied) {
-    if (applyWithProvenance) {
-      try {
-        const traced = await applyWithProvenance(hybridTab.content, gated.content)
-        if (traced?.warnings?.length) warnings.push(...traced.warnings)
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e)
-        if (/changed|preview|unavailable/i.test(message)) {
-          return { ok: false, error: message, applied: false }
-        }
-        warnings.push(message)
-      }
-      return {
-        ok: true,
-        applied: true,
-        repairNotes: gated.repairNotes,
-        warnings: warnings.length ? warnings : undefined,
-        diagnostics: gated.diagnostics
-      }
-    }
+    // Specification text is committed before provenance. A trace-save failure must not drop the edit.
     useHistoryStore().applyDocument(hybridTab.id, gated.content, {
       kind: HistoryKinds.visualPatch,
       immediate: true
     })
     void useWorkspaceStore().resyncModulesFromOpenTabs()
+    if (applyWithProvenance) {
+      try {
+        const traced = await applyWithProvenance(expectedBefore, gated.content)
+        if (traced?.warnings?.length) warnings.push(...traced.warnings)
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        warnings.push(`Trace metadata was not updated: ${message}. The specification text was kept.`)
+      }
+    }
   }
   return {
     ok: true,

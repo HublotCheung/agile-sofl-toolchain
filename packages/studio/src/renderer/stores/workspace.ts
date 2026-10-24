@@ -101,19 +101,37 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return doc.documentTabs.find((t) => t.filePath && filePathsEqual(t.filePath, path))
   }
 
+  /** Main project Hybrid file from manifest — never a dual-save slice under .agile-sofl/modules/. */
+  function resolvePrimaryHybridPath(): string | undefined {
+    const files = scan.value?.files ?? []
+    const root = activeProject.value?.rootPath
+    const rel = scan.value?.manifest?.hybrid?.[0]
+    const normRoot = root?.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    if (rel && normRoot) {
+      const relNorm = rel.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
+      for (const f of files) {
+        if (f.kind !== 'asfl') continue
+        const norm = f.path.replace(/\\/g, '/').toLowerCase()
+        if (filePathsEqual(f.path, rel) || norm === `${normRoot}/${relNorm}` || norm.endsWith(`/${relNorm}`)) {
+          return f.path
+        }
+      }
+    }
+    return files.find(
+      (f) => f.kind === 'asfl' && !/[/\\]\.agile-sofl[/\\]modules[/\\]/i.test(f.path)
+    )?.path
+  }
+
+  function isDualSaveModuleArtifact(path: string): boolean {
+    return /[/\\]\.agile-sofl[/\\]modules[/\\]/i.test(path)
+  }
+
   const informalTab = computed(() => {
     const path = scan.value?.files.find((f) => f.kind === 'aspec')?.path
     return tabForProjectFile(path)
   })
 
-  const hybridTab = computed(() => {
-    const root = activeProject.value?.rootPath
-    const fromModule = selectedModule.value?.filePath
-    const fromScan = scan.value?.files.find((f) => f.kind === 'asfl')?.path
-    const path =
-      fromModule && root && fileBelongsToRoot(fromModule, root) ? fromModule : fromScan
-    return tabForProjectFile(path)
-  })
+  const hybridTab = computed(() => tabForProjectFile(resolvePrimaryHybridPath()))
 
   const guiTab = computed(() => {
     const path = scan.value?.files.find((f) => f.kind === 'guispec')?.path
@@ -210,6 +228,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     agentBusySources.value = {}
   }
 
+  async function persistDocumentPath(path: string): Promise<boolean> {
+    await useHistoryStore().flushRegistered()
+    const tab = doc.documentTabs.find((t) => t.filePath && filePathsEqual(t.filePath, path))
+    if (!tab || tab.kind !== 'document') return false
+    await window.studio!.fileWrite(path, tab.content)
+    doc.markSaved(tab.id, path, path.split(/[/\\]/).pop() ?? tab.title)
+    if (tab.documentKind === 'asfl') await markHybridSaved(path)
+    return true
+  }
+
   async function persistDirtyDocuments(): Promise<boolean> {
     await useHistoryStore().flushRegistered()
     for (const tab of doc.documentTabs.filter((t) => t.isDirty)) {
@@ -303,6 +331,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function loadProjectFiles(payload: WorkspaceScanPayload): Promise<void> {
     for (const file of payload.files) {
       if (file.kind === 'manifest') continue
+      if (file.kind === 'asfl' && isDualSaveModuleArtifact(file.path)) continue
       const result = await window.studio!.fileRead(file.path)
       doc.openFromFile(result.filePath, result.content, result.title)
       await new Promise((resolve) => setTimeout(resolve, 0))
@@ -695,6 +724,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     persistUi,
     resyncModulesFromOpenTabs,
     persistDirtyDocuments,
+    persistDocumentPath,
+    resolvePrimaryHybridPath,
     confirmLeaveActiveProject
   }
 })

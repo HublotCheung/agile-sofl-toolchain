@@ -1,8 +1,8 @@
 "use strict";
 const editorApi = require("@agile-sofl/editor-api");
-const parser$2 = require("@agile-sofl/parser");
 const node_fs = require("node:fs");
 const node_path = require("node:path");
+const parser$2 = require("@agile-sofl/parser");
 const electron = require("electron");
 const promises = require("node:fs/promises");
 const node_crypto = require("node:crypto");
@@ -736,7 +736,9 @@ function writeModuleArtifacts(filePath, content) {
   } catch (e) {
     return { written: [], skipped: `parse failed: ${String(e)}` };
   }
-  if (!ast || ast.type !== "program" || ast.modules.length === 0) return { written: [], skipped: "no parsable modules" };
+  if (!ast || ast.type !== "program" || ast.modules.length === 0) {
+    return { written: [], skipped: "no parsable modules" };
+  }
   const dir = moduleArtifactDir(filePath);
   node_fs.mkdirSync(dir, { recursive: true });
   const written = [];
@@ -10867,6 +10869,13 @@ function readRefinementLog(projectRoot) {
 function projectRefinementState(projectRoot, source) {
   return editorApi.buildRefinementState(source, readRefinementLog(projectRoot), informalGrainNotes(projectRoot));
 }
+function appendAgentToolWarning(existing, note) {
+  const line = note.trim();
+  if (!line) return existing ?? "";
+  if (!existing?.trim()) return line;
+  return `${existing}
+${line}`;
+}
 function patchFingerprint(patch) {
   return JSON.stringify({
     target: patch.target ?? "",
@@ -10874,9 +10883,22 @@ function patchFingerprint(patch) {
     operations: patch.operations ?? []
   });
 }
+function patchValidation(accept, blocking, message, warnings = []) {
+  const w = warnings.length ? warnings : message && !accept ? [message] : warnings;
+  return {
+    accept,
+    blocking,
+    warnings: w,
+    ok: accept && w.length === 0,
+    message: message || w[0] || "ok"
+  };
+}
+function softPatchWarning(message) {
+  return patchValidation(true, false, message, [message]);
+}
 function validateAgentPatch(target, patch, options) {
   if (!Array.isArray(patch.operations) || patch.operations.length === 0) {
-    return { ok: false, message: "Patch has no operations." };
+    return patchValidation(false, true, "Patch has no operations.");
   }
   const mode = options?.mode ?? patch.mode ?? "crud";
   if (mode === "source") {
@@ -10884,28 +10906,25 @@ function validateAgentPatch(target, patch, options) {
       const kind = String(op.op || "");
       if (kind === "replace-document") {
         if (typeof op.text !== "string" && typeof op.asflText !== "string") {
-          return { ok: false, message: "replace-document requires text." };
+          return softPatchWarning("replace-document requires text.");
         }
         continue;
       }
       if (kind === "append") {
         if (typeof op.text !== "string" || !String(op.text).length) {
-          return { ok: false, message: "append requires text." };
+          return softPatchWarning("append requires text.");
         }
         continue;
       }
       if (kind === "replace") {
         if (!String(op.oldText ?? op.from ?? "").length) {
-          return { ok: false, message: "replace requires oldText (a unique snippet from the current source)." };
+          return softPatchWarning("replace requires oldText (a unique snippet from the current source).");
         }
         continue;
       }
-      return {
-        ok: false,
-        message: `Unknown source op "${kind}". Use replace, append, or replace-document.`
-      };
+      return softPatchWarning(`Unknown source op "${kind}". Use replace, append, or replace-document.`);
     }
-    return { ok: true, message: "ok" };
+    return patchValidation(true, false, "ok");
   }
   if (target === "gui") {
     const allowed = /* @__PURE__ */ new Set([
@@ -10923,52 +10942,47 @@ function validateAgentPatch(target, patch, options) {
     for (const op of patch.operations) {
       const kind = String(op.op || "");
       if (!allowed.has(kind)) {
-        return {
-          ok: false,
-          message: `Unknown GUI op "${kind}". Use add-screen, add-widget, replace-html, replace-screen-html, insert-html.`
-        };
+        return softPatchWarning(
+          `Unknown GUI op "${kind}". Use add-screen, add-widget, replace-html, replace-screen-html, insert-html.`
+        );
       }
     }
-    return { ok: true, message: "ok" };
+    return patchValidation(true, false, "ok");
   }
   for (const op of patch.operations) {
     const kind = String(op.op || "");
     if (kind === "refine-step") {
       const stepKind = String(op.kind || "");
-      if (!stepKind) return { ok: false, message: "refine-step requires kind." };
+      if (!stepKind) return softPatchWarning("refine-step requires kind.");
       if (stepKind === "FormalizePredicate") {
         if (!String(op.fromText ?? "").trim() || op.toText == null || !String(op.toText).trim()) {
-          return {
-            ok: false,
-            message: "FormalizePredicate requires fromText (the current informal sentence) and toText (legal ASFL)."
-          };
+          return softPatchWarning(
+            "FormalizePredicate requires fromText (the current informal sentence) and toText (legal ASFL)."
+          );
         }
       }
       if (stepKind === "ClassifyGrain") {
         const grain = String(op.grainClass ?? "");
         if (!String(op.moduleName ?? "").trim() || !String(op.processName ?? "").trim() || grain !== "operation" && grain !== "abstract") {
-          return {
-            ok: false,
-            message: "ClassifyGrain requires moduleName, processName, and grainClass operation|abstract."
-          };
+          return softPatchWarning(
+            "ClassifyGrain requires moduleName, processName, and grainClass operation|abstract."
+          );
         }
       }
       continue;
     }
     if (kind === "replace-document" || typeof op.asflText === "string") {
-      return {
-        ok: false,
-        message: "replace-document / asflText is not allowed on CRUD. Use add/update/remove, or call propose_source_edit for a source-level fix."
-      };
+      return softPatchWarning(
+        "replace-document / asflText is not allowed on CRUD. Use add/update/remove, or call propose_source_edit for a source-level fix."
+      );
     }
     const blobs = [op.text, op.fsf, op.pre, op.post, op.comment, op.signature];
     for (const blob of blobs) {
       if (typeof blob !== "string") continue;
       if (/\b(?:module|system)\b[\s\S]{6,}end_module\b/i.test(blob) || /\bend_module\b/i.test(blob)) {
-        return {
-          ok: false,
-          message: "Do not put whole modules or end_module in CRUD fields. Add each entity as a separate operation, or call propose_source_edit if you must edit the .asfl text."
-        };
+        return softPatchWarning(
+          "Do not put whole modules or end_module in CRUD fields. Add each entity as a separate operation, or call propose_source_edit if you must edit the .asfl text."
+        );
       }
     }
   }
@@ -10976,17 +10990,17 @@ function validateAgentPatch(target, patch, options) {
     for (const op of patch.operations) {
       const kind = String(op.op || "");
       if (kind === "add") {
-        if (!op.kind) return { ok: false, message: "Hybrid add requires kind (module, type, var, inv, process, …)." };
+        if (!op.kind) return softPatchWarning("Hybrid add requires kind (module, type, var, inv, process, …).");
         if (op.kind !== "inv" && !String(op.name ?? "").trim()) {
-          return { ok: false, message: "Hybrid add requires name." };
+          return softPatchWarning("Hybrid add requires name.");
         }
       }
       if ((kind === "update" || kind === "remove" || kind === "replace-process-body") && !String(op.id ?? "").trim()) {
-        return { ok: false, message: `${kind} requires an inventory id.` };
+        return softPatchWarning(`${kind} requires an inventory id.`);
       }
     }
   }
-  return { ok: true, message: "ok" };
+  return patchValidation(true, false, "ok");
 }
 function consecutiveWriteFailures(toolContents) {
   let n = 0;
@@ -11005,7 +11019,7 @@ function crudBlockedByFailures(lastFailed, incoming) {
   if (incoming.mode === "source") return null;
   if (!lastFailed) return null;
   if (lastFailed.fingerprint === incoming.fingerprint) {
-    return "This patch already failed. Do not retry it unchanged. Read the error, rewrite the fragment (legal ASFL, a unique fromText) or propose_source_edit, then continue.";
+    return "This patch matches one that did not change the file last time. Prefer a different CRUD or propose_source_edit after read_* view=source — but you may still apply it if the user confirms.";
   }
   return null;
 }
@@ -11358,17 +11372,20 @@ async function hybridDiagnosticsWithSemantic(asfl, cfg) {
     semantic = await semanticDiagnostics(asfl ?? "", cfg);
   } catch {
   }
-  const items = [
-    ...base2.items,
-    ...semantic.map((d) => ({
-      severity: d.severity,
-      code: d.code,
-      source: /^ASFL_FSF_1/.test(d.code) ? "L1" : "L2",
-      line: d.span.line,
-      column: d.span.column,
-      message: d.message
-    }))
-  ];
+  const items = editorApi.adjustRefinementDiagnosticSeverity(
+    [
+      ...base2.items,
+      ...semantic.map((d) => ({
+        severity: d.severity,
+        code: d.code,
+        source: /^ASFL_FSF_1/.test(d.code) ? "L1" : "L2",
+        line: d.span.line,
+        column: d.span.column,
+        message: d.message
+      }))
+    ],
+    false
+  );
   return {
     count: items.length,
     errors: items.filter((d) => d.severity === "error").length,
@@ -11488,7 +11505,7 @@ ${toolLines.join("\n")}
 Agile-SOFL conventions:
 - There is exactly one system module. Name it SYSTEM_<SystemName> after the whole product (e.g. SYSTEM_FoodDelivery). It is the root; every other module is a child: module Auth / FoodDelivery;
 - SYSTEM_ is listed first in the .asfl file. Do not treat GUI_App or a feature module as the system module.
-- A GUI module is a Hybrid child (module GUI_App / System;). gui.html is the prototype, not the module. If the user asks for a GUI module or prototype and none exists, add empty GUI_App with propose_hybrid_changes before any screen. propose_gui_changes is rejected until that module exists. Do not ask again after the user already requested it. Never add sample OpenNext/OpenHome processes. Generation parameter GUI=false is the only case that skips the module.
+- A GUI module is a Hybrid child (module GUI_App / System;). gui.html is the prototype, not the module. If the user asks for a GUI module or prototype and none exists, add empty GUI_App with propose_hybrid_changes before any screen. propose_gui_changes may warn until that module exists; still prefer adding GUI_App first. Do not ask again after the user already requested it. Never add sample OpenNext/OpenHome processes. Generation parameter GUI=false is the only case that skips the module.
 - Processes without known ports use signature (). Inventing (x: nat) ok: nat is wrong.
 - There is no implication operator: write not A or B instead. Process logic is written as FSF: FSF : T1 && D1 || T2 && D2 || … || others && Dn.
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.
@@ -12021,16 +12038,10 @@ ${note}` : note;
           if (target === "gui") {
             const gate = missingHybridGuiModule(ctx.hybridAsfl);
             if (gate.missing) {
-              const error = guiModuleRequiredError(gate.parentId);
-              session.messages.push({
-                id: call.id,
-                role: "tool",
-                content: JSON.stringify({ ok: false, error, next: error }),
-                timestamp: (/* @__PURE__ */ new Date()).toISOString()
-              });
-              live.content = live.content || error;
-              markCallStatus(live, call.id, "error", sink);
-              continue;
+              live.toolWarning = appendAgentToolWarning(
+                live.toolWarning,
+                `${guiModuleRequiredError(gate.parentId)} You can still preview GUI changes; add module GUI_App via propose_hybrid_changes when ready.`
+              );
             }
           }
           let patch = call.function.name === "propose_refinement_step" ? {
@@ -12089,83 +12100,49 @@ ${note}` : note;
             const normalized = normalizeHybridPatch(patch);
             patch = normalized.patch;
             if (normalized.unresolved) {
-              const error = `Could not auto-repair illegal ASFL (${normalized.unresolved}).`;
-              session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
-                fingerprint: patchFingerprint(patch),
-                error,
-                mode
-              });
-              session.messages.push({
-                id: call.id,
-                role: "tool",
-                content: JSON.stringify({
-                  ok: false,
-                  error,
-                  next: "Rewrite ^ as conc(seq, elem) and drop VDM primes. Re-propose a different patch. Do not stop."
-                }),
-                timestamp: (/* @__PURE__ */ new Date()).toISOString()
-              });
-              live.content = live.content || error;
-              markCallStatus(live, call.id, "error", sink);
-              continue;
+              live.toolWarning = appendAgentToolWarning(
+                live.toolWarning,
+                `Could not auto-repair illegal ASFL (${normalized.unresolved}). The patch is still offered — apply and fix in a follow-up, or rewrite ^ / VDM primes before apply.`
+              );
             }
           }
-          const blocked = crudBlockedByFailures(session.context.lastFailedWrite, {
+          const repeatHint = crudBlockedByFailures(session.context.lastFailedWrite, {
             fingerprint: patchFingerprint(patch),
             mode
           });
-          if (blocked) {
-            session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
-              fingerprint: patchFingerprint(patch),
-              error: blocked,
-              mode
-            });
+          if (repeatHint) {
+            live.toolWarning = appendAgentToolWarning(live.toolWarning, repeatHint);
+          }
+          const validity = validateAgentPatch(target, patch, { mode });
+          if (!validity.accept) {
             session.messages.push({
               id: call.id,
               role: "tool",
               content: JSON.stringify({
                 ok: false,
-                error: blocked,
-                next: "Do not retry the same CRUD. Call read_* with view=source, then propose_source_edit."
+                error: validity.message,
+                next: "Send a non-empty patch (at least one operation). Do not stop."
               }),
               timestamp: (/* @__PURE__ */ new Date()).toISOString()
             });
-            live.content = live.content || `Patch rejected: ${blocked}`;
+            live.content = live.content || validity.message;
             markCallStatus(live, call.id, "error", sink);
             continue;
           }
-          const validity = validateAgentPatch(target, patch, { mode });
-          if (!validity.ok) {
-            const emptyPatch = !Array.isArray(patch.operations) || patch.operations.length === 0;
-            if (!emptyPatch) {
-              session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
-                fingerprint: patchFingerprint(patch),
-                error: validity.message,
-                mode
-              });
-            }
-            session.messages.push({
-              id: call.id,
-              role: "tool",
-              content: JSON.stringify({
-                ok: false,
-                error: validity.message,
-                next: mode === "source" ? "Fix the source-edit operations (unique oldText, or append / replace-document). Do not stop." : "Tool rejected that patch. Read the inventory, or view=source then propose_source_edit. Do not stop."
-              }),
-              timestamp: (/* @__PURE__ */ new Date()).toISOString()
-            });
-            live.content = live.content || `Patch rejected: ${validity.message}`;
-            markCallStatus(live, call.id, "error", sink);
-            continue;
+          if (validity.warnings.length) {
+            live.toolWarning = appendAgentToolWarning(
+              live.toolWarning,
+              `Patch lint: ${validity.warnings.join(" ")} Apply may partially no-op; read_* and follow up.`
+            );
           }
           if (target === "hybrid" && ctx.informalMarkdown.trim()) {
             const sources = new Set(informalEntities(ctx.informalMarkdown).map((e) => e.locator));
-            const createsNodes = patch.operations.some((op) => op.op === "add" && !["module", "gui-screen", "scenario"].includes(String(op.kind)));
+            const createsNodes = patch.operations.some(
+              (op) => op.op === "add" && !["module", "gui-screen", "scenario"].includes(String(op.kind))
+            );
             const invalid = patch.traceLinks?.some((l) => !sources.has(l.sourceId) || !l.targetId);
             if (invalid || createsNodes && sources.size > 0 && !patch.traceLinks?.length) {
-              session.messages.push({ id: call.id, role: "tool", content: JSON.stringify({ ok: false, error: "Missing or invalid modeling provenance.", next: "Read the Informal inventory. Re-propose the patch with traceLinks containing exact sourceId and fully qualified targetId for each new semantic node. Fix this yourself; do not ask the user to manage links." }), timestamp: (/* @__PURE__ */ new Date()).toISOString() });
-              markCallStatus(live, call.id, "error", sink);
-              continue;
+              live.toolWarning = "Informal ↔ Hybrid provenance (traceLinks) is missing or incomplete. The patch is still offered — apply the Hybrid change and add or fix trace links in a follow-up. Prefer exact sourceId and targetId when you can.";
             }
           }
           live.content = patch.explanation || live.content || (mode === "source" ? `Proposed ${target} source edit.` : `Proposed ${target} specification changes.`);
@@ -12343,7 +12320,7 @@ async function resumeWithToolResult(session, projectRoot, ctx, toolCallId, resul
         event: "proposal_decision",
         tool: isRefine ? "propose_refinement_step" : patch.mode === "source" ? "propose_source_edit" : `propose_${patch.target ?? "informal"}_changes`,
         stepType: isRefine ? String(op0?.kind ?? "") : void 0,
-        decision: payload.action === "applied" && !payload.error ? "approved" : payload.action === "rejected" ? "rejected" : "error",
+        decision: payload.action === "applied" ? "approved" : payload.action === "rejected" ? "rejected" : "error",
         toolCallId
       });
     }

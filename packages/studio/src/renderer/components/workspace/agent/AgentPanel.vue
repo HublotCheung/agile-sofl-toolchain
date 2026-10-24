@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useHistoryStore } from '../../../stores/history'
 import { useWorkspaceStore } from '../../../stores/workspace'
 import { useSettingsStore } from '../../../stores/settings'
 import { useModalStore } from '../../../stores/modal'
@@ -633,6 +634,22 @@ async function applyPatch(
     const kept = result.ok !== false || result.applied || Boolean(warnings?.length)
     if (kept) {
       if (session.value?.id === id) error.value = ''
+      if (workspace.hasWorkspace) {
+        try {
+          await useHistoryStore().flushRegistered()
+          if (patch.target === 'hybrid') {
+            const path = workspace.resolvePrimaryHybridPath()
+            if (path) await workspace.persistDocumentPath(path)
+          } else if (patch.target === 'informal') {
+            const path = workspace.informalTab?.filePath
+            if (path) await workspace.persistDocumentPath(path)
+          } else {
+            await workspace.persistDirtyDocuments()
+          }
+        } catch (e) {
+          console.warn('[agent] auto-save after apply failed:', e)
+        }
+      }
       if (!toolId) return result.ok
       await resume(
         id,

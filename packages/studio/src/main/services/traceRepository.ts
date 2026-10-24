@@ -130,8 +130,50 @@ export function readTrace(pair: Pick<TracePair, 'root' | 'informalPath' | 'hybri
   if(graph.entities.length)graph.files=files
   return graph
 }
+function coerceEntity(e: TraceDocument['entities'][number]): TraceDocument['entities'][number] {
+  return {
+    ...e,
+    side: e.side === 'hybrid' ? 'hybrid' : 'informal',
+    locator: String(e.locator ?? ''),
+    kind: String(e.kind ?? 'unknown'),
+    title: String(e.title ?? ''),
+    parent: String(e.parent ?? ''),
+    text: String(e.text ?? ''),
+    shape: String(e.shape ?? ''),
+    context: String(e.context ?? ''),
+    dependencies: Array.isArray(e.dependencies) ? e.dependencies.filter((x) => typeof x === 'string') : [],
+    start: Number.isInteger(e.start) ? e.start : 0,
+    end: Number.isInteger(e.end) ? e.end : 0,
+    present: e.present !== false,
+    leaf: e.leaf !== false
+  }
+}
+
+/** Drop entities/links that cannot satisfy the trace schema instead of failing the spec write. */
+export function sanitizeTraceDocument(document: TraceDocument): TraceDocument {
+  const seen = new Set<string>()
+  const entities: TraceDocument['entities'] = []
+  for (const raw of document.entities ?? []) {
+    if (!raw || typeof raw.id !== 'string' || !raw.id || seen.has(raw.id)) continue
+    seen.add(raw.id)
+    entities.push(coerceEntity(raw))
+  }
+  const links = (document.links ?? []).filter((l) => {
+    if (!l || typeof l.id !== 'string') return false
+    if (!seen.has(l.source) || !seen.has(l.target)) return false
+    if (typeof l.reason !== 'string') return false
+    if (typeof l.baseline?.informal !== 'string' || typeof l.baseline?.hybrid !== 'string') return false
+    const source = entities.find((e) => e.id === l.source)
+    const target = entities.find((e) => e.id === l.target)
+    return source?.side === 'informal' && target?.side === 'hybrid'
+  })
+  return { ...document, entities, links }
+}
+
 export function writeTrace(pair: TracePair, document: TraceDocument, expected: number): TraceDocument {
-  validateTrace(document)
+  const sanitized = sanitizeTraceDocument(document)
+  validateTrace(sanitized)
+  document = sanitized
   const path=traceStoragePath(pair)
   for(const file of document.files??[])projectRelative(pair.root,file.path)
   for(const entity of document.entities)if(entity.documentPath)projectRelative(pair.root,entity.documentPath)
