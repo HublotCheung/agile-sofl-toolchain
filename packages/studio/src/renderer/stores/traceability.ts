@@ -5,7 +5,7 @@ import { defineStore } from 'pinia'
 import { useWorkspaceStore } from './workspace'
 import { useDocumentStore } from './document'
 import { useHistoryStore } from './history'
-import { bindGeneratedTrace, traceNotification, type GeneratedTraceLink } from '../../shared/traceInteraction'
+import { bindGeneratedTraceSoft, traceNotification, type GeneratedTraceLink } from '../../shared/traceInteraction'
 import { emptyTrace, linkBaseline, linkState, sameBaseline,
   type TraceDocument, type TraceEntity, type TraceLink, type TracePair, type TraceProposal, type TraceSide, type TraceIdentityHint } from '../../shared/traceability'
 
@@ -277,7 +277,7 @@ export const useTraceabilityStore = defineStore('traceability', () => {
       })
     })
   }
-  async function applyGeneratedContent(beforeText: string, next: string, links: GeneratedTraceLink[]): Promise<void> {
+  async function applyGeneratedContent(beforeText: string, next: string, links: GeneratedTraceLink[]): Promise<{ warnings: string[] }> {
     await history.flushRegistered()
     if (!pair.value) throw new Error('Open and save the project Informal and Hybrid files before applying modeled nodes.')
     if (pair.value.hybrid !== beforeText) throw new Error('The specification changed. Generate a new preview.')
@@ -287,22 +287,43 @@ export const useTraceabilityStore = defineStore('traceability', () => {
     const result = await window.studio!.traceRead(nextPair)
     assertPair(p)
     if (result.document.revision !== before.revision) throw new Error('Project changed during modeling. Retry the preview.')
-    bindGeneratedTrace(before,result.document,links,p.informalPath,p.hybridPath,()=>crypto.randomUUID())
+    const soft = bindGeneratedTraceSoft(before,result.document,links,p.informalPath,p.hybridPath,()=>crypto.randomUUID())
+    const warningsOut = [...soft.warnings]
     const tab = workspace.hybridTab!
     const changes = [{path:p.hybridPath,side:'hybrid' as const,before:beforeText,after:next}]
-    const journalId = window.studio?.traceStage ? await window.studio.traceStage(p,result.document,changes) : null
-    await serial(async()=>{
-      try {
-        assertPair(p)
-        const saved = await window.studio!.traceSave(p,result.document,before.revision)
-        try { assertPair(p) } catch(e) { document.value=await window.studio!.traceSave(p,before,saved.revision);throw e }
-        documents.setContent(tab.id,next); document.value=saved
-        if(journalId)history.registerEffect('trace-transaction:'+journalId,async state=>{await window.studio!.traceFinish(p,journalId,state as 'buffers-applied'|'discarded')})
-        history.commit({kind:'traceability',label:'Apply modeling with source bindings',immediate:true,mutations:[{tabId:tab.id,filePath:p.hybridPath,before:beforeText,after:next}],effects:[{key:effectKey(p),before:JSON.stringify(before),after:JSON.stringify(saved)},...(journalId?[{key:'trace-transaction:'+journalId,before:'discarded',after:'buffers-applied'}]:[])]})
-      } catch(e) { if(journalId)await window.studio!.traceFinish(p,journalId,'discarded');throw e }
-    })
-    if(journalId)await window.studio!.traceFinish(p,journalId,'buffers-applied').catch(e=>{warnings.value=[String(e)]})
+    const keepText = () => {
+      if (!tab || workspace.hybridTab?.content !== beforeText) return
+      documents.setContent(tab.id, next)
+      history.commit({kind:'traceability',label:'Apply modeling with source bindings',immediate:true,mutations:[{tabId:tab.id,filePath:p.hybridPath,before:beforeText,after:next}],effects:[]})
+    }
+    let journalId: string | null = null
+    try {
+      journalId = window.studio?.traceStage ? await window.studio.traceStage(p,result.document,changes) : null
+      await serial(async()=>{
+        try {
+          assertPair(p)
+          if (workspace.hybridTab?.content !== beforeText) throw new Error('Documents changed while processing. Refresh and try again.')
+          const saved = await window.studio!.traceSave(p,result.document,before.revision)
+          try { assertPair(p) } catch(e) { document.value=await window.studio!.traceSave(p,before,saved.revision);throw e }
+          if (workspace.hybridTab?.content !== beforeText) {
+            document.value=await window.studio!.traceSave(p,before,saved.revision)
+            throw new Error('Documents changed while processing. Refresh and try again.')
+          }
+          documents.setContent(tab.id,next); document.value=saved
+          if(journalId)history.registerEffect('trace-transaction:'+journalId,async state=>{await window.studio!.traceFinish(p,journalId,state as 'buffers-applied'|'discarded')})
+          history.commit({kind:'traceability',label:'Apply modeling with source bindings',immediate:true,mutations:[{tabId:tab.id,filePath:p.hybridPath,before:beforeText,after:next}],effects:[{key:effectKey(p),before:JSON.stringify(before),after:JSON.stringify(saved)},...(journalId?[{key:'trace-transaction:'+journalId,before:'discarded',after:'buffers-applied'}]:[])]})
+        } catch(e) { if(journalId)await window.studio!.traceFinish(p,journalId,'discarded');throw e }
+      })
+      if(journalId)await window.studio!.traceFinish(p,journalId,'buffers-applied').catch(e=>{warningsOut.push(String(e))})
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      if (/changed|preview/i.test(message)) throw e
+      warningsOut.push(`Trace metadata was not updated: ${message}. The specification text was kept.`)
+      keepText()
+    }
     void workspace.resyncModulesFromOpenTabs()
+    if (warningsOut.length) warnings.value = warningsOut
+    return { warnings: warningsOut }
   }
   async function rebind(plan:TraceRebindPlan):Promise<void> {
     await guarded(()=>change('Rebind trace links',doc=>{const result=applyRebindPlan(doc,plan,()=>crypto.randomUUID());doc.links=result.links}))

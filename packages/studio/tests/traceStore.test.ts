@@ -145,13 +145,13 @@ describe('trace UI state and undo transactions', () => {
     expect(trace.notifications('hybrid')).toHaveLength(0)
     expect(trace.notifications('informal')).toHaveLength(1)
   })
-  it('rejects modeled nodes without provenance before changing any text',async()=>{
+  it('writes modeled text and warns when provenance is missing',async()=>{
     const trace=useTraceabilityStore(),ws=useWorkspaceStore()
     await trace.refreshNow()
     const next=initialHybrid.replace('end_module;','process Return()\npost true\nend_process;\nend_module;')
-    await expect(trace.applyGeneratedContent(initialHybrid,next,[])).rejects.toThrow('Missing generation provenance')
-    expect(ws.hybridTab!.content).toBe(initialHybrid)
-    expect(disk.links).toHaveLength(0)
+    const result=await trace.applyGeneratedContent(initialHybrid,next,[])
+    expect(result.warnings.join(' ')).toMatch(/Missing generation provenance/)
+    expect(ws.hybridTab!.content).toBe(next)
   })
   it('applies modeling and stable source bindings as a single undoable operation',async()=>{
     const trace=useTraceabilityStore(),ws=useWorkspaceStore(),history=useHistoryStore()
@@ -166,11 +166,13 @@ describe('trace UI state and undo transactions', () => {
     await history.undo();expect(ws.hybridTab!.content).toBe(initialHybrid);expect(disk.links).toHaveLength(0)
     await history.redo();expect(ws.hybridTab!.content).toBe(next);expect(disk.links[0]!.id).toBe(newLink.id)
   })
-  it('does not apply modeled text if metadata persistence fails',async()=>{
+  it('keeps modeled text when metadata persistence fails',async()=>{
     const {trace}=await linked(),ws=useWorkspaceStore()
+    const next=initialHybrid.replace('true','false')
     window.studio!.traceSave=vi.fn(async()=>{throw new Error('disk unavailable')})
-    await expect(trace.applyGeneratedContent(initialHybrid,initialHybrid.replace('true','false'),[])).rejects.toThrow('disk unavailable')
-    expect(ws.hybridTab!.content).toBe(initialHybrid)
+    const result=await trace.applyGeneratedContent(initialHybrid,next,[])
+    expect(result.warnings.join(' ')).toMatch(/disk unavailable/)
+    expect(ws.hybridTab!.content).toBe(next)
   })
   it('does not overwrite typing received during a modeling metadata write',async()=>{
     const {trace}=await linked(),ws=useWorkspaceStore(),docs=useDocumentStore()

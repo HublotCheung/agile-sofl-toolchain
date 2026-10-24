@@ -5,6 +5,7 @@ import {
   uniqueSlug
 } from './hybridIds.js'
 import { findModuleRange, hybridLeftoverMessage, listModuleHeaders, scanModuleInvariants, scanModuleProcesses } from './moduleSourceRange.js'
+import { adjustRefinementDiagnosticSeverity } from './refinementLint.js'
 import { buildVisualModelTolerant, type VisualModelResult, type VisualParseDiagnostic } from './visualParse.js'
 
 function clip(text: string, n: number): string {
@@ -33,10 +34,16 @@ function moduleNameForOffset(modules: VisualModelResult['modules'], start: numbe
   return best?.name ?? null
 }
 
-function diagnosticsFromModel(model: VisualModelResult): HybridAgentDiagnostic[] {
+function diagnosticsFromModel(
+  model: VisualModelResult,
+  refinementTolerant: boolean
+): HybridAgentDiagnostic[] {
   const rank = (severity: string) =>
     severity === 'error' ? 0 : severity === 'warning' ? 1 : 2
-  return model.diagnostics
+  const list = refinementTolerant
+    ? adjustRefinementDiagnosticSeverity(model.diagnostics, false)
+    : model.diagnostics
+  return list
     .filter((d) => {
       if (d.severity === 'error') return true
       // Incomplete specs without cdfd/retrieve are expected; keep agent inventory clean.
@@ -56,7 +63,13 @@ function diagnosticsFromModel(model: VisualModelResult): HybridAgentDiagnostic[]
 
 export function collectHybridAgentDiagnostics(source: string): HybridAgentDiagnostic[] {
   if (!source.trim()) return []
-  return diagnosticsFromModel(buildVisualModelTolerant(source))
+  return diagnosticsFromModel(buildVisualModelTolerant(source), true)
+}
+
+/** Raw checker severities — for write deltas and “new issue” detection. */
+export function collectHybridWriteLintDiagnostics(source: string): HybridAgentDiagnostic[] {
+  if (!source.trim()) return []
+  return diagnosticsFromModel(buildVisualModelTolerant(source), false)
 }
 
 export function formatHybridDiagnostics(
@@ -177,7 +190,7 @@ export function formatHybridInventory(source: string, maxChars = 12000): string 
   const leftover = hybridLeftoverMessage(source)
   const model = buildVisualModelTolerant(source)
   overlaySourceInventory(source, model)
-  const diagnostics = formatHybridDiagnostics(diagnosticsFromModel(model), 3500)
+  const diagnostics = formatHybridDiagnostics(diagnosticsFromModel(model, true), 3500)
   const hasIssues = diagnostics !== '(no hybrid diagnostics)'
   if (!model.modules.length) {
     const parts = [

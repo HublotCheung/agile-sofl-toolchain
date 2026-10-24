@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bindGeneratedTrace } from '../src/shared/traceInteraction'
+import { bindGeneratedTrace, bindGeneratedTraceSoft } from '../src/shared/traceInteraction'
 import { emptyTrace } from '../src/shared/traceability'
 import { generatedIRTraceLinks, refreshTrace } from '../src/main/services/traceEngine'
 import { parseInformalSpec, ruleBasedHybridGenerator } from '@agile-sofl/aspec'
@@ -23,12 +23,49 @@ describe('modeling provenance',()=>{
     let id=0;bindGeneratedTrace(before,after,[{sourceId:source.locator,targetId:target.locator}],pair.informalPath,pair.hybridPath,()=>String(++id))
     for(const entity of after.entities.filter(e=>e.side==='hybrid'))expect(after.links.some(l=>l.target===entity.id)).toBe(true)
   })
+  it('warns instead of throwing when provenance cannot be bound', () => {
+    const before = refreshTrace(emptyTrace(), pair)
+    const after = refreshTrace(structuredClone(before), {
+      ...pair,
+      hybrid: 'module SYSTEM_Library;\nprocess Borrow()\npost true\nend_process;\nend_module;'
+    })
+    const source = after.entities.find((e) => e.side === 'informal')!
+    const soft = bindGeneratedTraceSoft(
+      before,
+      after,
+      [{ sourceId: source.locator, targetId: 'Borrow' }],
+      pair.informalPath,
+      pair.hybridPath,
+      () => crypto.randomUUID()
+    )
+    expect(soft.warnings.join(' ')).toMatch(/unresolved/)
+    expect(after.entities.some((e) => e.kind === 'process')).toBe(true)
+  })
+
   it('rejects a guessed or ambiguous target name',()=>{
     const before=refreshTrace(emptyTrace(),pair)
     const after=refreshTrace(structuredClone(before),{...pair,hybrid:'module SYSTEM_Library;\nprocess Borrow()\npost true\nend_process;\nend_module;'})
     const source=after.entities.find(e=>e.side==='informal')!
     expect(()=>bindGeneratedTrace(before,after,[{sourceId:source.locator,targetId:'Borrow'}],pair.informalPath,pair.hybridPath,()=>crypto.randomUUID())).toThrow('unresolved')
   })
+  it('resolves inv:Module.N by zero-based inventory index', () => {
+    const hybrid =
+      'module SYSTEM_Library;\ninv\n  limit > 0;\n  cap >= limit;\nend_module;'
+    const before = refreshTrace(emptyTrace(), { ...pair, hybrid })
+    const after = refreshTrace(structuredClone(before), { ...pair, hybrid })
+    const source = after.entities.find((e) => e.side === 'informal')!.locator
+    bindGeneratedTrace(
+      before,
+      after,
+      [{ sourceId: source, targetId: 'inv:Library.1', relation: 'constrains' }],
+      pair.informalPath,
+      pair.hybridPath,
+      () => crypto.randomUUID()
+    )
+    const second = after.entities.find((e) => e.kind === 'invariant' && e.text.includes('cap >='))!
+    expect(after.links.some((l) => l.target === second.id && l.relation === 'constrains')).toBe(true)
+  })
+
   it('resolves a named invariant among several new ones in the same module', () => {
     const before = refreshTrace(emptyTrace(), pair)
     const after = refreshTrace(structuredClone(before), {

@@ -1701,6 +1701,15 @@ function compactDiagnosticPayload(payload) {
     diagnosticView: "At most 12 items, 800 message characters per item, 12000 item characters; full counts retained."
   };
 }
+function missingHybridGuiModule(hybridAsfl) {
+  const source = hybridAsfl ?? "";
+  if (/\bmodule\s+GUI_/i.test(source) || /(^|\n)\s*gui\s+[A-Za-z_]/i.test(source)) return { missing: false };
+  const system = /module\s+SYSTEM_([A-Za-z_][A-Za-z0-9_]*)/i.exec(source);
+  return { missing: true, parentId: system ? `mod:${system[1]}` : "mod:<SystemName>" };
+}
+function guiModuleRequiredError(parentId) {
+  return `No Hybrid GUI module yet. gui.html is only the prototype. First call propose_hybrid_changes: op=add kind=module name=GUI_App parentId=${parentId}. Do not ask again if the user already requested a GUI module or prototype. After that module is applied, continue with propose_gui_changes.`;
+}
 var composer$1 = {};
 var directives$2 = {};
 var identity$x = {};
@@ -9989,7 +9998,7 @@ const AGENT_SKILLS = [
   {
     id: "requirement-discovery",
     name: "Requirement Discovery",
-    prompt: "Discover Functions, Data Resources, and Constraints from the user's natural language. Do not dump a full specification. Summarize candidates, then ask clarifying questions, then propose structured propose_changes patches. After each applied write, read_specification and continue until the inventory is complete, then summarize. If CRUD cannot express a fix, read view=source and propose_source_edit. The full journey is Informal → Hybrid+GUI → dual-line refinement until the refinement digest is unambiguous. If Hybrid already exists with remaining gaps, after Informal work call read_refinement_state and invite the next refinement slice — do not stop as if the specification were finished."
+    prompt: "Discover Functions, Data Resources, and Constraints from the user's natural language. Do not dump a full specification. Summarize candidates, then ask clarifying questions, then propose structured propose_changes patches. After each applied write, read_specification and continue until the inventory is complete, then summarize. If CRUD cannot express a fix, read view=source and propose_source_edit. The full journey is Informal → Hybrid+GUI → dual-line refinement until the refinement digest is unambiguous. If Hybrid already exists with remaining gaps, after Informal work call read_refinement_state and invite the next refinement slice — do not stop as if the specification were finished. When the user asks for a GUI module or prototype, gui.html is not the module: first propose_hybrid_changes add kind=module name=GUI_App under the SYSTEM_ module, then propose_gui_changes. A GUI HTML call is rejected until GUI_App exists."
   },
   {
     id: "requirement-clarification",
@@ -10031,7 +10040,11 @@ Stakeholder decisions:
 - After an answer, apply only what was confirmed; ask again if another distinct stakeholder choice remains open.
 Pipeline — keep going after each applied patch until every enabled stage is done, then summarize:
 1. Read Informal and Hybrid inventories. If Hybrid already exists and strategy is ask, call ask_clarification (merge vs rebuild).
-2. Module architecture: add the SYSTEM_ module, then each semantic module (and a GUI module) with propose_hybrid_changes op=add kind=module. Do not paste module source.
+2. Module architecture: add the SYSTEM_ module, then each semantic module with propose_hybrid_changes op=add kind=module. Do not paste module source.
+GUI module decision (once, before you treat architecture as done):
+- Parameter GUI=true: add an empty child module GUI_App (parentId = the SYSTEM_ module). No sample screens, view constants, or OpenNext/OpenHome processes.
+- Parameter GUI=false: do not add a GUI module and do not ask.
+- Parameter absent, and the inventory has no GUI module (no name starting with GUI_, no gui block): call ask_clarification — "是否创建 GUI 模块？" options create-gui-module "创建空的 GUI_App" and skip-gui-module "暂不创建". Create only the empty GUI_App child when the user chooses create. Do not invent a GUI module in silence.
 3. Per module: add types/variables from Data Resources (kind=type|var, parentId=mod:…).
 4. Per module: add process signatures from Functions (kind=process).
 5. Per process: replace-process-body or add scenarios. Write the FSF (FSF : T1 && D1 || T2 && D2 || … || others && Dn); Ti/Di may be structured natural language at this stage. Enumerations use {<Tag>}.
@@ -10310,7 +10323,7 @@ const AGENT_TOOLS = [
     type: "function",
     function: {
       name: "propose_gui_changes",
-      description: 'Propose a structured GUI HTML patch. ONE screen per call (replace-screen-html or add-screen) with a complete inner layout (navbar/sidebar/hero/cards/forms/tables), not a single button and not every screen at once. Ops: add-screen (optional html), remove-screen, add-widget, replace-html, replace-screen-html, insert-html, patch-node, remove-node. Whitelist HTML5 tags; any as-* class is allowed. Bind with data-process / data-bind / data-nav. Inline <script type="text/as-logic"> is allowed for calculations and animations and runs in a sandbox. Also allowed: onclick, oninput, onchange. Never emit <script src>, style=, href, or src.',
+      description: 'Propose a structured GUI HTML patch for the prototype only. This does not create the Hybrid GUI module. If no module GUI_App exists, this call is rejected — add that empty module with propose_hybrid_changes first. ONE screen per call (replace-screen-html or add-screen) with a complete inner layout (navbar/sidebar/hero/cards/forms/tables), not a single button and not every screen at once. Ops: add-screen (optional html), remove-screen, add-widget, replace-html, replace-screen-html, insert-html, patch-node, remove-node. Whitelist HTML5 tags; any as-* class is allowed. Bind with data-process / data-bind / data-nav. Inline <script type="text/as-logic"> is allowed for calculations and animations and runs in a sandbox. Also allowed: onclick, oninput, onchange. Never emit <script src>, style=, href, or src.',
       parameters: {
         type: "object",
         properties: {
@@ -11023,10 +11036,20 @@ function continuationUserText(lastToolContent, failures = 0) {
   }
   const sourceHint = "If CRUD cannot express the fix, call read_* with view=source, then propose_source_edit (replace/append/replace-document). That is allowed.";
   if (action === "applied") {
-    if (error) {
-      return `The patch was applied, but some operations failed: ${error}. Immediately call read_specification and/or read_hybrid_specification, fix remaining work with CRUD or ${sourceHint}`;
+    let diagnosticsNote = "";
+    try {
+      const parsed = JSON.parse(lastToolContent || "{}");
+      if (parsed.diagnostics?.errors) {
+        diagnosticsNote = ` Diagnostics still list ${parsed.diagnostics.errors} syntax error(s). The write succeeded; fix them with a follow-up patch. Do not retry the identical text.`;
+      } else if (parsed.warnings?.length) {
+        diagnosticsNote = ` Lint warnings: ${parsed.warnings.slice(0, 4).join(" | ")}. The write succeeded; continue and fix them.`;
+      }
+    } catch {
     }
-    return "The patch was applied. Immediately call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed). Compare with the plan, and either propose the next incremental CRUD/refinement step or write a final summary. If the refinement digest is not unambiguous, invite the next slice with ask_clarification. Do not wait for a new user message.";
+    if (error) {
+      return `The patch was applied, but some operations failed: ${error}. Immediately call read_specification and/or read_hybrid_specification, fix remaining work with CRUD or ${sourceHint}${diagnosticsNote}`;
+    }
+    return `The patch was applied. Immediately call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed). Compare with the plan, and either propose the next incremental CRUD/refinement step or write a final summary. If Diagnostics list syntax errors, fix them before the next feature. If the refinement digest is not unambiguous, invite the next slice with ask_clarification. Do not wait for a new user message.${diagnosticsNote}`;
   }
   if (action === "error" || failures >= 2) {
     return `The write failed: ${error || "unknown error"}. This is a tool result, not a stopped session. Do not retry the same patch unchanged. Rewrite it (legal ASFL, unique fromText) and re-propose, or call read_specification and/or read_hybrid_specification with view=source, then propose_source_edit to unstick (replace a unique snippet, append, or replace-document). Then verify. Do not stop with an empty message.`;
@@ -11038,15 +11061,19 @@ function continuationUserText(lastToolContent, failures = 0) {
 }
 function appliedToolResult(extra) {
   const notes = [
-    extra?.repair ? `Auto-repair kept the write legal: ${extra.repair}.` : "",
+    extra?.repair ? `Auto-repair applied before save: ${extra.repair}.` : "",
+    extra?.warnings?.length ? `Lint: ${extra.warnings.slice(0, 6).join(" | ")}` : "",
+    extra?.diagnostics?.errors ? `Diagnostics: ${extra.diagnostics.errors} error(s), ${extra.diagnostics.warnings} warning(s). The write was kept.` : "",
     extra?.userNote ? `The user also said: ${extra.userNote}. Follow that after verifying.` : ""
   ].filter(Boolean);
-  const next = extra?.error ? `Some operations failed: ${extra.error}. Read the inventory (and view=source if needed). Follow up with a corrected CRUD or propose_source_edit. Do not stop.` : "Call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed) to verify. If syntax errors remain, fix them before the next step. If more work remains, propose the next CRUD or propose_refinement_step (or propose_source_edit if CRUD cannot express it). If Hybrid still has dual-line gaps, ask_clarification for the next slice. If the task is complete, write a short summary and stop.";
+  const next = extra?.error ? `Some operations were not applied: ${extra.error}. The rest of the write was kept. Read the inventory (and view=source if needed). Follow up with a corrected CRUD or propose_source_edit. Do not stop.` : extra?.diagnostics?.errors || extra?.warnings?.length ? "The write was kept, including any incomplete or non-conforming text. Call read_specification and/or read_hybrid_specification, then fix Diagnostics with another patch. Do not retry the identical text and do not stop." : "Call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed) to verify. If syntax errors remain, fix them before the next step. If more work remains, propose the next CRUD or propose_refinement_step (or propose_source_edit if CRUD cannot express it). If Hybrid still has dual-line gaps, ask_clarification for the next slice. If the task is complete, write a short summary and stop.";
   return JSON.stringify({
     action: "applied",
-    ok: !extra?.error,
+    ok: true,
     error: extra?.error,
     repair: extra?.repair,
+    warnings: extra?.warnings,
+    diagnostics: extra?.diagnostics,
     userNote: extra?.userNote,
     next: [next, ...notes].join(" ")
   });
@@ -11438,7 +11465,7 @@ node names are processes in that module; store names are vars; ports match the p
   const refinementGuide = permissions.hybrid.read ? `Dual-line refinement (guide the user; do not auto-refine the whole tree):
 - Journey: Informal → Hybrid+GUI → process atomicity + data discharge + operational grain until the refinement digest reports unambiguous=true.
 - Operational grain: a leaf is not atomic just because pre/post are formal. If the digest lists variations or a name-claim, ask_clarification about those extracted items only, then ClassifyGrain or ResolveVariation. Do not invent operations, and do not clear grainAmbiguity by rewriting pre/post.
-- Predicate text must lex as ASFL. There is no VDM post-state prime and no ^. The final value is the bare name (~x is the initial value). Sequence append is conc(seq, elem). != is <>. Studio rewrites a trailing prime and a clear ^ before the write is kept, and it refuses a write that would add syntax errors. If a tool result says the write was not kept or a patch already failed, rewrite that fragment and re-propose. Do not retry the identical text and do not stop.
+- Predicate text should lex as ASFL. There is no VDM post-state prime and no ^. The final value is the bare name (~x is the initial value). Sequence append is conc(seq, elem). != is <>. Studio rewrites a trailing prime and a clear ^ and then keeps the write even if Diagnostics remain. A tool result with action "applied" succeeded; warnings and diagnostics are lint, not a failed write. Call read_* and patch the remaining issues. Do not retry the identical text and do not stop.
 - Empty name-only modules and stub (name-only) processes are gaps. Hybrid generation does not finish the specification.
 - After Hybrid/GUI work for this turn is done, if unambiguous=false, ask_clarification with 2–4 next slices from the digest. Wait for the user unless they already named a slice.
 - Prefer propose_refinement_step, then propose_hybrid_changes. Fallback: propose_source_edit on Hybrid.
@@ -11461,6 +11488,7 @@ ${toolLines.join("\n")}
 Agile-SOFL conventions:
 - There is exactly one system module. Name it SYSTEM_<SystemName> after the whole product (e.g. SYSTEM_FoodDelivery). It is the root; every other module is a child: module Auth / FoodDelivery;
 - SYSTEM_ is listed first in the .asfl file. Do not treat GUI_App or a feature module as the system module.
+- A GUI module is a Hybrid child (module GUI_App / System;). gui.html is the prototype, not the module. If the user asks for a GUI module or prototype and none exists, add empty GUI_App with propose_hybrid_changes before any screen. propose_gui_changes is rejected until that module exists. Do not ask again after the user already requested it. Never add sample OpenNext/OpenHome processes. Generation parameter GUI=false is the only case that skips the module.
 - Processes without known ports use signature (). Inventing (x: nat) ok: nat is wrong.
 - There is no implication operator: write not A or B instead. Process logic is written as FSF: FSF : T1 && D1 || T2 && D2 || … || others && Dn.
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.
@@ -11990,6 +12018,21 @@ ${note}` : note;
               continue;
             }
           }
+          if (target === "gui") {
+            const gate = missingHybridGuiModule(ctx.hybridAsfl);
+            if (gate.missing) {
+              const error = guiModuleRequiredError(gate.parentId);
+              session.messages.push({
+                id: call.id,
+                role: "tool",
+                content: JSON.stringify({ ok: false, error, next: error }),
+                timestamp: (/* @__PURE__ */ new Date()).toISOString()
+              });
+              live.content = live.content || error;
+              markCallStatus(live, call.id, "error", sink);
+              continue;
+            }
+          }
           let patch = call.function.name === "propose_refinement_step" ? {
             target: "hybrid",
             mode: "crud",
@@ -12314,9 +12357,9 @@ async function resumeWithToolResult(session, projectRoot, ctx, toolCallId, resul
       } catch {
       }
     }
-    if (payload.action === "applied" && !payload.error) {
+    if (payload.action === "applied") {
       session.context.lastFailedWrite = void 0;
-    } else if (payload.action === "error" || payload.action === "applied" && payload.error) {
+    } else if (payload.action === "error") {
       session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
         fingerprint: patchFingerprint(patch),
         error: payload.error || "Tool failed",
@@ -12334,7 +12377,13 @@ async function resumeWithToolResult(session, projectRoot, ctx, toolCallId, resul
   let clarificationDisplay;
   if (payload.type === "user_instruction") toolContent = userInstructionToolResult(payload.text || result);
   else if (payload.action === "applied")
-    toolContent = appliedToolResult({ error: payload.error, userNote: payload.userNote, repair: payload.repair });
+    toolContent = appliedToolResult({
+      error: payload.error,
+      userNote: payload.userNote,
+      repair: payload.repair,
+      warnings: payload.warnings,
+      diagnostics: payload.diagnostics
+    });
   else if (payload.action === "error") toolContent = failedToolResult(payload.error || "Tool failed", payload.userNote);
   else if (payload.action === "rejected") toolContent = rejectedToolResult();
   else if (clarificationMsg?.clarification) {
@@ -12372,8 +12421,14 @@ async function resumeWithToolResult(session, projectRoot, ctx, toolCallId, resul
         } else {
           const unansweredWrite = !payload.action && pendingWrite;
           m.resolution = payload.action === "applied" ? "applied" : payload.action === "error" || unansweredWrite ? "error" : "rejected";
-          if (payload.error) m.toolError = payload.error;
+          if (payload.action === "error" && payload.error) m.toolError = payload.error;
           else if (unansweredWrite) m.toolError = "Pending change was not applied.";
+          else if (payload.action === "applied" && (payload.warnings?.length || payload.diagnostics?.errors)) {
+            m.toolWarning = [
+              ...payload.warnings ?? [],
+              payload.diagnostics?.errors ? `${payload.diagnostics.errors} syntax diagnostic(s) remain` : ""
+            ].filter(Boolean).join("\n");
+          }
         }
       }
     }

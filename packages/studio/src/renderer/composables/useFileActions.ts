@@ -35,19 +35,21 @@ export function useFileActions() {
     return true
   }
 
-  async function saveWorkspace(): Promise<boolean> {
-    const workspace = useWorkspaceStore()
-    if (!workspace.hasWorkspace) return saveTab()
-    const focused = workspace.tabForFocusedPanel()
-    if (focused?.isDirty) return saveTab(focused.id)
-    const tabs = [workspace.informalTab, workspace.hybridTab, workspace.guiTab]
-    for (const tab of tabs) {
-      if (tab?.isDirty) {
-        const ok = await saveTab(tab.id)
-        if (!ok) return false
-      }
+  async function saveAllDirtyDocumentTabs(): Promise<boolean> {
+    await useHistoryStore().flushRegistered()
+    for (const tab of doc.documentTabs.filter((t) => t.kind === 'document' && t.isDirty)) {
+      const ok = await saveTab(tab.id)
+      if (!ok) return false
     }
     return true
+  }
+
+  async function saveWorkspace(): Promise<boolean> {
+    const workspace = useWorkspaceStore()
+    if (workspace.hasWorkspace) return workspace.persistDirtyDocuments()
+    const dirty = doc.documentTabs.filter((t) => t.kind === 'document' && t.isDirty)
+    if (dirty.length) return saveAllDirtyDocumentTabs()
+    return saveTab()
   }
 
   async function saveAsTab(): Promise<boolean> {
@@ -97,18 +99,30 @@ export function useFileActions() {
   }
 
   async function tryCloseWindow(): Promise<void> {
-    const dirtyTabs = doc.documentTabs.filter((t) => t.isDirty)
-    for (const tab of dirtyTabs) {
-      doc.setActive(tab.id)
-      const action = await confirmCloseTab(tab.id)
-      if (action === 'cancel') return
-      if (action === 'discard') {
-        tab.isDirty = false
-      }
-    }
-    if (!doc.documentTabs.some((t) => t.isDirty)) {
+    const workspace = useWorkspaceStore()
+    if (workspace.hasWorkspace) {
+      if (!(await workspace.confirmLeaveActiveProject('dialog.unsaved.projectQuitMessage'))) return
       window.studio!.confirmClose()
+      return
     }
+
+    const dirtyTabs = doc.documentTabs.filter((t) => t.kind === 'document' && t.isDirty)
+    if (!dirtyTabs.length) {
+      window.studio!.confirmClose()
+      return
+    }
+
+    const { index: response } = await modal.show({
+      title: t('dialog.unsaved.title'),
+      message: t('dialog.unsaved.standaloneMessage'),
+      buttons: [t('dialog.unsaved.save'), t('dialog.unsaved.dontSave'), t('dialog.unsaved.cancel')]
+    })
+    if (response === 0) {
+      if (!(await saveAllDirtyDocumentTabs())) return
+    } else if (response === 2) {
+      return
+    }
+    window.studio!.confirmClose()
   }
 
   return {

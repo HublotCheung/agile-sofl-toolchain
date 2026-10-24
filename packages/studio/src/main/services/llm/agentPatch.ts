@@ -1,6 +1,13 @@
 import { clarificationContinuationText } from '../../../shared/clarificationAnswer'
 import type { InformalPatchPayload } from './agentTypes'
 
+export function appendAgentToolWarning(existing: string | undefined, note: string): string {
+  const line = note.trim()
+  if (!line) return existing ?? ''
+  if (!existing?.trim()) return line
+  return `${existing}\n${line}`
+}
+
 export function patchFingerprint(patch: {
   target?: string
   mode?: string
@@ -13,13 +20,44 @@ export function patchFingerprint(patch: {
   })
 }
 
+export type AgentPatchValidation = {
+  /** Show patch preview / run apply pipeline */
+  accept: boolean
+  /** True only when the tool cannot run at all (empty payload) */
+  blocking: boolean
+  warnings: string[]
+  /** Legacy: true when accept and no lint warnings */
+  ok: boolean
+  message: string
+}
+
+function patchValidation(
+  accept: boolean,
+  blocking: boolean,
+  message: string,
+  warnings: string[] = []
+): AgentPatchValidation {
+  const w = warnings.length ? warnings : message && !accept ? [message] : warnings
+  return {
+    accept,
+    blocking,
+    warnings: w,
+    ok: accept && w.length === 0,
+    message: message || w[0] || 'ok'
+  }
+}
+
+function softPatchWarning(message: string): AgentPatchValidation {
+  return patchValidation(true, false, message, [message])
+}
+
 export function validateAgentPatch(
   target: 'informal' | 'hybrid' | 'gui',
   patch: InformalPatchPayload,
   options?: { mode?: 'crud' | 'source' }
-): { ok: boolean; message: string } {
+): AgentPatchValidation {
   if (!Array.isArray(patch.operations) || patch.operations.length === 0) {
-    return { ok: false, message: 'Patch has no operations.' }
+    return patchValidation(false, true, 'Patch has no operations.')
   }
   const mode = options?.mode ?? patch.mode ?? 'crud'
   if (mode === 'source') {
@@ -27,28 +65,25 @@ export function validateAgentPatch(
       const kind = String(op.op || '')
       if (kind === 'replace-document') {
         if (typeof op.text !== 'string' && typeof op.asflText !== 'string') {
-          return { ok: false, message: 'replace-document requires text.' }
+          return softPatchWarning('replace-document requires text.')
         }
         continue
       }
       if (kind === 'append') {
         if (typeof op.text !== 'string' || !String(op.text).length) {
-          return { ok: false, message: 'append requires text.' }
+          return softPatchWarning('append requires text.')
         }
         continue
       }
       if (kind === 'replace') {
         if (!String(op.oldText ?? op.from ?? '').length) {
-          return { ok: false, message: 'replace requires oldText (a unique snippet from the current source).' }
+          return softPatchWarning('replace requires oldText (a unique snippet from the current source).')
         }
         continue
       }
-      return {
-        ok: false,
-        message: `Unknown source op "${kind}". Use replace, append, or replace-document.`
-      }
+      return softPatchWarning(`Unknown source op "${kind}". Use replace, append, or replace-document.`)
     }
-    return { ok: true, message: 'ok' }
+    return patchValidation(true, false, 'ok')
   }
   if (target === 'gui') {
     const allowed = new Set([
@@ -66,25 +101,23 @@ export function validateAgentPatch(
     for (const op of patch.operations) {
       const kind = String(op.op || '')
       if (!allowed.has(kind)) {
-        return {
-          ok: false,
-          message: `Unknown GUI op "${kind}". Use add-screen, add-widget, replace-html, replace-screen-html, insert-html.`
-        }
+        return softPatchWarning(
+          `Unknown GUI op "${kind}". Use add-screen, add-widget, replace-html, replace-screen-html, insert-html.`
+        )
       }
     }
-    return { ok: true, message: 'ok' }
+    return patchValidation(true, false, 'ok')
   }
   for (const op of patch.operations) {
     const kind = String(op.op || '')
     if (kind === 'refine-step') {
       const stepKind = String(op.kind || '')
-      if (!stepKind) return { ok: false, message: 'refine-step requires kind.' }
+      if (!stepKind) return softPatchWarning('refine-step requires kind.')
       if (stepKind === 'FormalizePredicate') {
         if (!String(op.fromText ?? '').trim() || op.toText == null || !String(op.toText).trim()) {
-          return {
-            ok: false,
-            message: 'FormalizePredicate requires fromText (the current informal sentence) and toText (legal ASFL).'
-          }
+          return softPatchWarning(
+            'FormalizePredicate requires fromText (the current informal sentence) and toText (legal ASFL).'
+          )
         }
       }
       if (stepKind === 'ClassifyGrain') {
@@ -94,30 +127,25 @@ export function validateAgentPatch(
           !String(op.processName ?? '').trim() ||
           (grain !== 'operation' && grain !== 'abstract')
         ) {
-          return {
-            ok: false,
-            message: 'ClassifyGrain requires moduleName, processName, and grainClass operation|abstract.'
-          }
+          return softPatchWarning(
+            'ClassifyGrain requires moduleName, processName, and grainClass operation|abstract.'
+          )
         }
       }
       continue
     }
     if (kind === 'replace-document' || typeof op.asflText === 'string') {
-      return {
-        ok: false,
-        message:
-          'replace-document / asflText is not allowed on CRUD. Use add/update/remove, or call propose_source_edit for a source-level fix.'
-      }
+      return softPatchWarning(
+        'replace-document / asflText is not allowed on CRUD. Use add/update/remove, or call propose_source_edit for a source-level fix.'
+      )
     }
     const blobs = [op.text, op.fsf, op.pre, op.post, op.comment, op.signature]
     for (const blob of blobs) {
       if (typeof blob !== 'string') continue
       if (/\b(?:module|system)\b[\s\S]{6,}end_module\b/i.test(blob) || /\bend_module\b/i.test(blob)) {
-        return {
-          ok: false,
-          message:
-            'Do not put whole modules or end_module in CRUD fields. Add each entity as a separate operation, or call propose_source_edit if you must edit the .asfl text.'
-        }
+        return softPatchWarning(
+          'Do not put whole modules or end_module in CRUD fields. Add each entity as a separate operation, or call propose_source_edit if you must edit the .asfl text.'
+        )
       }
     }
   }
@@ -125,20 +153,20 @@ export function validateAgentPatch(
     for (const op of patch.operations) {
       const kind = String(op.op || '')
       if (kind === 'add') {
-        if (!op.kind) return { ok: false, message: 'Hybrid add requires kind (module, type, var, inv, process, …).' }
+        if (!op.kind) return softPatchWarning('Hybrid add requires kind (module, type, var, inv, process, …).')
         if (op.kind !== 'inv' && !String(op.name ?? '').trim()) {
-          return { ok: false, message: 'Hybrid add requires name.' }
+          return softPatchWarning('Hybrid add requires name.')
         }
       }
       if (
         (kind === 'update' || kind === 'remove' || kind === 'replace-process-body') &&
         !String(op.id ?? '').trim()
       ) {
-        return { ok: false, message: `${kind} requires an inventory id.` }
+        return softPatchWarning(`${kind} requires an inventory id.`)
       }
     }
   }
-  return { ok: true, message: 'ok' }
+  return patchValidation(true, false, 'ok')
 }
 
 export type FailedWriteRecord = {
@@ -162,6 +190,7 @@ export function consecutiveWriteFailures(toolContents: string[]): number {
   return n
 }
 
+/** Hint only — never blocks offering or applying a patch. */
 export function crudBlockedByFailures(
   lastFailed: FailedWriteRecord | undefined,
   incoming: { fingerprint: string; mode: 'crud' | 'source' }
@@ -169,7 +198,7 @@ export function crudBlockedByFailures(
   if (incoming.mode === 'source') return null
   if (!lastFailed) return null
   if (lastFailed.fingerprint === incoming.fingerprint) {
-    return 'This patch already failed. Do not retry it unchanged. Read the error, rewrite the fragment (legal ASFL, a unique fromText) or propose_source_edit, then continue.'
+    return 'This patch matches one that did not change the file last time. Prefer a different CRUD or propose_source_edit after read_* view=source — but you may still apply it if the user confirms.'
   }
   return null
 }
@@ -207,10 +236,22 @@ export function continuationUserText(lastToolContent?: string, failures = 0): st
   const sourceHint =
     'If CRUD cannot express the fix, call read_* with view=source, then propose_source_edit (replace/append/replace-document). That is allowed.'
   if (action === 'applied') {
+    let diagnosticsNote = ''
+    try {
+      const parsed = JSON.parse(lastToolContent || '{}') as {
+        warnings?: string[]
+        diagnostics?: { errors?: number }
+      }
+      if (parsed.diagnostics?.errors) {
+        diagnosticsNote = ` Diagnostics still list ${parsed.diagnostics.errors} syntax error(s). The write succeeded; fix them with a follow-up patch. Do not retry the identical text.`
+      } else if (parsed.warnings?.length) {
+        diagnosticsNote = ` Lint warnings: ${parsed.warnings.slice(0, 4).join(' | ')}. The write succeeded; continue and fix them.`
+      }
+    } catch { /* already parsed above */ }
     if (error) {
-      return `The patch was applied, but some operations failed: ${error}. Immediately call read_specification and/or read_hybrid_specification, fix remaining work with CRUD or ${sourceHint}`
+      return `The patch was applied, but some operations failed: ${error}. Immediately call read_specification and/or read_hybrid_specification, fix remaining work with CRUD or ${sourceHint}${diagnosticsNote}`
     }
-    return 'The patch was applied. Immediately call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed). Compare with the plan, and either propose the next incremental CRUD/refinement step or write a final summary. If the refinement digest is not unambiguous, invite the next slice with ask_clarification. Do not wait for a new user message.'
+    return `The patch was applied. Immediately call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed). Compare with the plan, and either propose the next incremental CRUD/refinement step or write a final summary. If Diagnostics list syntax errors, fix them before the next feature. If the refinement digest is not unambiguous, invite the next slice with ask_clarification. Do not wait for a new user message.${diagnosticsNote}`
   }
   if (action === 'error' || failures >= 2) {
     return `The write failed: ${error || 'unknown error'}. This is a tool result, not a stopped session. Do not retry the same patch unchanged. Rewrite it (legal ASFL, unique fromText) and re-propose, or call read_specification and/or read_hybrid_specification with view=source, then propose_source_edit to unstick (replace a unique snippet, append, or replace-document). Then verify. Do not stop with an empty message.`
@@ -221,19 +262,33 @@ export function continuationUserText(lastToolContent?: string, failures = 0): st
   return 'Continue now. Prefer propose_changes / propose_hybrid_changes. If those fail, read source and propose_source_edit. After writes, read the spec to verify. When the task is done, write a short summary and stop. Do not reply with an empty message.'
 }
 
-export function appliedToolResult(extra?: { error?: string; userNote?: string; repair?: string }): string {
+export function appliedToolResult(extra?: {
+  error?: string
+  userNote?: string
+  repair?: string
+  warnings?: string[]
+  diagnostics?: { errors: number; warnings: number; items?: unknown[] }
+}): string {
   const notes = [
-    extra?.repair ? `Auto-repair kept the write legal: ${extra.repair}.` : '',
+    extra?.repair ? `Auto-repair applied before save: ${extra.repair}.` : '',
+    extra?.warnings?.length ? `Lint: ${extra.warnings.slice(0, 6).join(' | ')}` : '',
+    extra?.diagnostics?.errors
+      ? `Diagnostics: ${extra.diagnostics.errors} error(s), ${extra.diagnostics.warnings} warning(s). The write was kept.`
+      : '',
     extra?.userNote ? `The user also said: ${extra.userNote}. Follow that after verifying.` : ''
   ].filter(Boolean)
   const next = extra?.error
-    ? `Some operations failed: ${extra.error}. Read the inventory (and view=source if needed). Follow up with a corrected CRUD or propose_source_edit. Do not stop.`
-    : 'Call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed) to verify. If syntax errors remain, fix them before the next step. If more work remains, propose the next CRUD or propose_refinement_step (or propose_source_edit if CRUD cannot express it). If Hybrid still has dual-line gaps, ask_clarification for the next slice. If the task is complete, write a short summary and stop.'
+    ? `Some operations were not applied: ${extra.error}. The rest of the write was kept. Read the inventory (and view=source if needed). Follow up with a corrected CRUD or propose_source_edit. Do not stop.`
+    : extra?.diagnostics?.errors || extra?.warnings?.length
+      ? 'The write was kept, including any incomplete or non-conforming text. Call read_specification and/or read_hybrid_specification, then fix Diagnostics with another patch. Do not retry the identical text and do not stop.'
+      : 'Call read_specification and/or read_hybrid_specification and read_refinement_state (if Hybrid changed) to verify. If syntax errors remain, fix them before the next step. If more work remains, propose the next CRUD or propose_refinement_step (or propose_source_edit if CRUD cannot express it). If Hybrid still has dual-line gaps, ask_clarification for the next slice. If the task is complete, write a short summary and stop.'
   return JSON.stringify({
     action: 'applied',
-    ok: !extra?.error,
+    ok: true,
     error: extra?.error,
     repair: extra?.repair,
+    warnings: extra?.warnings,
+    diagnostics: extra?.diagnostics,
     userNote: extra?.userNote,
     next: [next, ...notes].join(' ')
   })

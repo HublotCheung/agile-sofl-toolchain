@@ -66,6 +66,7 @@ export type AgentMessage = {
   pending?: boolean
   resolution?: 'applied' | 'rejected' | 'answered' | 'error'
   toolError?: string
+  toolWarning?: string
 }
 
 export type AgentSession = {

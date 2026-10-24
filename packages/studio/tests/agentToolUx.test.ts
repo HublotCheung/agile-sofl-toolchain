@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   activeToolCall,
+  formatAgentToolError,
   formatToolArgsSize,
   isThinkingLive,
   parsePartialToolArgs,
@@ -17,6 +18,14 @@ describe('agent tool activity UX helpers', () => {
     expect(toolLabelKey('read_refinement_state')).toBe('agent.tool.readRefine')
     expect(toolLabelKey('read_specification')).toBe('agent.tool.readInformal')
     expect(toolLabelKey('not_a_tool')).toBe('agent.tool.generic')
+  })
+
+  it('shortens lexer errors for patch cards', () => {
+    const raw =
+      "Typed FSF replacement rejected before writing: Expecting token of type --> DoubleAmp <-- but found --> 'in' <--"
+    const friendly = formatAgentToolError(raw)
+    expect(friendly).toContain('ASFL')
+    expect(friendly).toContain('&&')
   })
 
   it('formats argument payload size', () => {

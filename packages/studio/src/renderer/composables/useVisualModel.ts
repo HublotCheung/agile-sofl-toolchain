@@ -238,7 +238,7 @@ export function useVisualModel(activeTabId: ComputedRef<string | undefined>) {
       return window.studio.patchInvariant({ ...payload, source })
     }
     if (action === 'patch') {
-      scheduleVisualPatch(key, run)
+      await applySourcePatch(run, { coalesceKey: key })
       return
     }
     await applySourcePatch(run)

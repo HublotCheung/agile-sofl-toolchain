@@ -88,7 +88,13 @@ export function useInformalSpec(tabId: Ref<string | undefined>) {
 
   async function applyPatch(
     patch: InformalPatchPayload
-  ): Promise<{ ok: boolean; error?: string; applied?: boolean }> {
+  ): Promise<{
+    ok: boolean
+    error?: string
+    applied?: boolean
+    warnings?: string[]
+    diagnostics?: { errors: number; warnings: number; items: Array<{ severity: string; code: string; message: string }> }
+  }> {
     const current = tab.value
     if (!current) return { ok: false, error: 'Patch service unavailable.' }
     if (isSourcePatch(patch)) {
@@ -102,16 +108,24 @@ export function useInformalSpec(tabId: Ref<string | undefined>) {
         last = result.content
         await rebuild()
       }
-      if (result.error) return { ok: false, error: result.error, applied }
-      return { ok: true, applied }
+      if (result.error && !applied) {
+        return { ok: true, applied: false, warnings: [result.error] }
+      }
+      return { ok: true, applied, warnings: result.error ? [result.error] : undefined }
     }
     if (!window.studio?.patchInformalSpec) return { ok: false, error: 'Patch service unavailable.' }
     const result = await window.studio.patchInformalSpec({
       source: current.content,
       patch: JSON.parse(JSON.stringify(patch)) as InformalPatchPayload
     })
-    if (!result.ok) return { ok: false, error: result.error || 'Patch failed.', applied: false }
     const applied = result.content !== current.content
+    if (!result.ok && !applied) {
+      return {
+        ok: true,
+        applied: false,
+        warnings: result.warnings ?? (result.error ? [result.error] : ['Patch did not change the document.'])
+      }
+    }
     if (applied) {
       for (const op of patch.operations) {
         if (op.op === 'update' && typeof op.id === 'string' && typeof op.title === 'string') useTraceabilityStore().hintRename('informal', op.id, op.title)
@@ -123,7 +137,19 @@ export function useInformalSpec(tabId: Ref<string | undefined>) {
       last = result.content
       await rebuild()
     }
-    return { ok: true, applied }
+    const model = applied ? await window.studio.buildInformalModel?.(result.content) : undefined
+    const items = (model?.diagnostics ?? [])
+      .filter((d) => d.severity === 'error' || d.severity === 'warning')
+      .slice(0, 12)
+      .map((d) => ({ severity: d.severity, code: d.code, message: d.message }))
+    const errors = (model?.diagnostics ?? []).filter((d) => d.severity === 'error').length
+    const warningCount = (model?.diagnostics ?? []).filter((d) => d.severity === 'warning').length
+    return {
+      ok: true,
+      applied,
+      warnings: result.warnings,
+      diagnostics: model ? { errors, warnings: warningCount, items } : undefined
+    }
   }
 
   async function addNode(

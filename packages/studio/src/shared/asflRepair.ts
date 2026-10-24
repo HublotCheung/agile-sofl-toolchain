@@ -77,28 +77,71 @@ export function normalizeHybridPatch<T extends { explanation?: string; operation
   }
 }
 
-export function acceptHybridWrite(
-  before: string,
-  after: string
-): { ok: boolean; content: string; error?: string; repairNotes?: string[] } {
+export type WriteDiagnosticItem = {
+  severity: string
+  code: string
+  message: string
+}
+
+export type WriteDiagnostics = {
+  errors: number
+  warnings: number
+  items: WriteDiagnosticItem[]
+}
+
+/** Soft write: repaired text is always committed. Syntax issues are lint, not a rollback. */
+export type WriteOutcome = {
+  ok: boolean
+  content: string
+  committed: boolean
+  error?: string
+  repairNotes?: string[]
+  warnings?: string[]
+  diagnostics?: WriteDiagnostics
+}
+
+function summarizeDiagnostics(source: string): WriteDiagnostics | undefined {
+  const all = collectHybridWriteDiagnostics(source)
+  if (!all.length) return undefined
+  return {
+    errors: all.filter((d) => d.severity === 'error').length,
+    warnings: all.filter((d) => d.severity === 'warning').length,
+    items: all.slice(0, 12).map((d) => ({
+      severity: d.severity,
+      code: d.code,
+      message: d.message.slice(0, 800)
+    }))
+  }
+}
+
+export function acceptHybridWrite(before: string, after: string): WriteOutcome {
   const repaired = repairAsflSurface(after)
   const introduced = introducedErrors(before, repaired.text)
+  const warnings: string[] = []
   if (introduced.length) {
     const sample = introduced
       .slice(0, 6)
       .map((d) => `${d.code} ${d.message}`)
       .join(' | ')
-    return {
-      ok: false,
-      content: before,
-      error: `Write not kept: it introduced ${introduced.length} syntax error(s). ${sample}. Rewrite with legal ASFL (no VDM prime ', no ^ — use conc(seq, elem); != is <>) and re-propose a different patch. Do not stop.`
-    }
+    warnings.push(
+      `Write kept with ${introduced.length} new syntax issue(s). ${sample}. The text is saved. Call read_hybrid_specification and fix the Diagnostics. Do not retry the identical text and do not stop.`
+    )
   }
+  if (repaired.unresolved) warnings.push(`Unresolved surface syntax left in place: ${repaired.unresolved}`)
   const changed = repaired.text !== after
+  const diagnostics = summarizeDiagnostics(repaired.text)
+  if (diagnostics && diagnostics.errors > 0 && !introduced.length) {
+    warnings.push(
+      `Write kept. Diagnostics still list ${diagnostics.errors} syntax error(s). Fix them in a follow-up patch; do not treat this as a failed write.`
+    )
+  }
   return {
     ok: true,
+    committed: true,
     content: repaired.text,
-    repairNotes: changed && repaired.notes.length ? repaired.notes : undefined
+    repairNotes: changed && repaired.notes.length ? repaired.notes : undefined,
+    warnings: warnings.length ? warnings : undefined,
+    diagnostics
   }
 }
 
@@ -109,7 +152,7 @@ function introducedErrors(
   const prior = errorMultiset(before)
   const seen = new Map<string, number>()
   const out: Array<{ code: string; message: string }> = []
-  for (const d of collectHybridWriteDiagnostics(after)) {
+  for (const d of lintDiagnosticsForDelta(after)) {
     if (d.severity !== 'error') continue
     const key = `${d.code}:${d.message}`
     const n = (seen.get(key) ?? 0) + 1
@@ -119,9 +162,20 @@ function introducedErrors(
   return out
 }
 
+/** Prefer raw hybrid lint when available (see collectHybridWriteLintDiagnostics). */
+function lintDiagnosticsForDelta(source: string): HybridWriteDiagnostic[] {
+  return hybridWriteLintFallback?.(source) ?? collectHybridWriteDiagnostics(source)
+}
+
+let hybridWriteLintFallback: ((source: string) => HybridWriteDiagnostic[]) | null = null
+
+export function setHybridWriteLintFallback(fn: (source: string) => HybridWriteDiagnostic[]): void {
+  hybridWriteLintFallback = fn
+}
+
 function errorMultiset(source: string): Map<string, number> {
   const map = new Map<string, number>()
-  for (const d of collectHybridWriteDiagnostics(source)) {
+  for (const d of lintDiagnosticsForDelta(source)) {
     if (d.severity !== 'error') continue
     const key = `${d.code}:${d.message}`
     map.set(key, (map.get(key) ?? 0) + 1)

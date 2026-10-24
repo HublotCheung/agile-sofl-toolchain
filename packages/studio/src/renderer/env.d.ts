@@ -47,6 +47,8 @@ declare module 'vue-i18n' {
     'window.close': string
     'dialog.unsaved.title': string
     'dialog.unsaved.message': string
+    'dialog.unsaved.standaloneMessage': string
+    'dialog.unsaved.projectQuitMessage': string
     'dialog.unsaved.save': string
     'dialog.unsaved.dontSave': string
     'dialog.unsaved.cancel': string

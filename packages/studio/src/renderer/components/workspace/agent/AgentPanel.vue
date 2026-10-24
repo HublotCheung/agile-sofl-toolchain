@@ -54,10 +54,24 @@ type AgentMessageView = AgentSessionPayload['messages'][0]
 
 const props = defineProps<{
   informalMarkdown: string
-  onApplyPatch: (patch: InformalPatchPayload) => Promise<{ ok: boolean; error?: string; applied?: boolean; repairNotes?: string[] }>
+  onApplyPatch: (patch: InformalPatchPayload) => Promise<{
+    ok: boolean
+    error?: string
+    applied?: boolean
+    repairNotes?: string[]
+    warnings?: string[]
+    diagnostics?: { errors: number; warnings: number; items?: unknown[] }
+  }>
   onApplyHybridPatch: (
     patch: InformalPatchPayload
-  ) => Promise<{ ok: boolean; error?: string; applied?: boolean; repairNotes?: string[] }>
+  ) => Promise<{
+    ok: boolean
+    error?: string
+    applied?: boolean
+    repairNotes?: string[]
+    warnings?: string[]
+    diagnostics?: { errors: number; warnings: number; items?: unknown[] }
+  }>
   embedInDock?: boolean
 }>()
 
@@ -614,13 +628,24 @@ async function applyPatch(
     if (!stillOnProject(rootAtStart)) return false
     const repair =
       'repairNotes' in result ? result.repairNotes?.filter(Boolean).join('; ') : undefined
-    if (result.ok) {
+    const warnings = 'warnings' in result ? result.warnings : undefined
+    const diagnostics = 'diagnostics' in result ? result.diagnostics : undefined
+    const kept = result.ok !== false || result.applied || Boolean(warnings?.length)
+    if (kept) {
       if (session.value?.id === id) error.value = ''
-      if (!toolId) return false
+      if (!toolId) return result.ok
       await resume(
         id,
         toolId,
-        JSON.stringify({ action: 'applied', userNote, repair: repair || undefined }),
+        JSON.stringify({
+          action: 'applied',
+          ok: true,
+          userNote,
+          repair: repair || undefined,
+          warnings,
+          diagnostics,
+          error: result.ok ? undefined : result.error
+        }),
         continueTurn
       )
       return true
@@ -634,14 +659,16 @@ async function applyPatch(
       id,
       toolId,
       JSON.stringify({
-        action: result.applied ? 'applied' : 'error',
+        action: 'applied',
+        ok: true,
         error: result.error || t('agent.applyFailed'),
         userNote,
-        repair: repair || undefined
+        repair: repair || undefined,
+        warnings: result.error ? [result.error] : undefined
       }),
       continueTurn
     )
-    return false
+    return true
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     if (!stillOnProject(rootAtStart)) return false
@@ -1347,6 +1374,7 @@ function permBadge(s: AgentSessionPayload): string {
               :auto-applying="Boolean(msg.pending) && settings.agentWriteMode === 'auto'"
               :resolution="msg.resolution"
               :tool-error="msg.toolError"
+              :tool-warning="msg.toolWarning"
               @apply="applyPatch(msg)"
               @reject="rejectPatch(msg)"
             />

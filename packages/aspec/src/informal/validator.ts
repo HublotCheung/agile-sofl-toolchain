@@ -13,7 +13,7 @@ export function validateInformalSpec(spec: InformalSpecification): AspecDiagnost
         createDiagnostic(
           DiagnosticCodes.INFORMAL_MISSING_SECTION,
           `Required section "${def.title}" is missing.`,
-          'error',
+          'warning',
           def.id
         )
       )

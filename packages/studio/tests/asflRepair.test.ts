@@ -1,11 +1,12 @@
-import { collectHybridAgentDiagnostics } from '@agile-sofl/editor-api'
+import { collectHybridAgentDiagnostics, collectHybridWriteLintDiagnostics } from '@agile-sofl/editor-api'
 import { check } from '@agile-sofl/parser'
 import { beforeAll, describe, expect, it } from 'vitest'
 import {
   acceptHybridWrite,
   normalizeHybridPatch,
   repairAsflSurface,
-  setHybridWriteDiagnosticCollector
+  setHybridWriteDiagnosticCollector,
+  setHybridWriteLintFallback
 } from '../src/shared/asflRepair'
 
 const loginPost =
@@ -56,6 +57,7 @@ describe('repairAsflSurface', () => {
 describe('acceptHybridWrite', () => {
   beforeAll(() => {
     setHybridWriteDiagnosticCollector(collectHybridAgentDiagnostics)
+    setHybridWriteLintFallback(collectHybridWriteLintDiagnostics)
   })
 
   const before = `module Auth;
@@ -75,16 +77,18 @@ end_module
     expect(gated.repairNotes?.length).toBeGreaterThan(0)
   })
 
-  it('refuses a write that still adds a syntax error', () => {
+  it('keeps a write that still adds a syntax error and reports a warning', () => {
     const after = before.replace('post ok = true', 'post ok = true @')
     const gated = acceptHybridWrite(before, after)
-    expect(gated.ok).toBe(false)
-    expect(gated.content).toBe(before)
-    expect(gated.error).toMatch(/not kept/)
-    expect(gated.error).toMatch(/@/)
+    expect(gated.ok).toBe(true)
+    expect(gated.committed).toBe(true)
+    expect(gated.content).toContain('@')
+    expect(gated.content).not.toBe(before)
+    expect(gated.warnings?.join(' ')).toMatch(/kept/i)
+    expect(gated.warnings?.join(' ')).toMatch(/@/)
   })
 
-  it('refuses a write when the full parser reports new errors', () => {
+  it('keeps a write when the full parser reports new errors', () => {
     setHybridWriteDiagnosticCollector((source) =>
       check(source, { fsfL1: false }).diagnostics
         .filter((d) => d.severity === 'error')
@@ -92,8 +96,10 @@ end_module
     )
     const after = before.replace('end_module', 'forall u: nat, x iff y\nend_module')
     const gated = acceptHybridWrite(before, after)
-    expect(gated.ok).toBe(false)
-    expect(gated.content).toBe(before)
+    expect(gated.ok).toBe(true)
+    expect(gated.committed).toBe(true)
+    expect(gated.content).not.toBe(before)
+    expect(gated.content).toContain('forall')
   })
 })
 

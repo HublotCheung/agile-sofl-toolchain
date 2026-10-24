@@ -2,7 +2,6 @@ import { previewTraceStructure, prepareTraceStructure } from './traceStructure'
 import type { TraceRebindPlan } from '../../shared/traceAdvanced'
 import { stageTraceTransaction, updateTraceTransaction, pendingTraceTransactions, recoverTraceJournal, saveTraceFiles } from './traceTransactions'
 import { ipcMain } from 'electron'
-import { collectHybridAgentDiagnostics } from '@agile-sofl/editor-api'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { cachedTraceCompletion, listTraceProviders } from './traceProviders'
@@ -192,17 +191,14 @@ export function prepareTraceProposal(pair: TracePair, doc: TraceDocument, propos
     const source=sources.find(s=>s.path===path)
     if(!source||typeof source.content!=='string')throw new Error('The target document is unavailable.')
     const before=source.content,after=applyTraceReplacements(before,edits)
+    let written = after
     if(proposal.direction==='hybrid') {
       const gate=acceptHybridWrite(before,after)
-      if(!gate.ok)throw new Error(gate.error)
-      if(gate.content!==after)throw new Error('Suggestion requires syntax repair. Generate a corrected preview before applying.')
-      const errors=new Map<string,number>()
-      for(const d of collectHybridAgentDiagnostics(before).filter(d=>d.severity==='error')){const key=d.code+':'+d.message;errors.set(key,(errors.get(key)??0)+1)}
-      for(const d of collectHybridAgentDiagnostics(after).filter(d=>d.severity==='error')){const key=d.code+':'+d.message,count=errors.get(key)??0;if(!count)throw new Error('Suggestion introduces an error: '+d.message);errors.set(key,count-1)}
+      written = gate.content
       const structure=(text:string)=>hybridEntities(text).entities.filter(e=>e.kind!=='scenario').map(e=>e.locator).sort()
-      if(JSON.stringify(structure(before))!==JSON.stringify(structure(after)))throw new Error('Suggestion changes specification structure. Use the editor to rename, split or add entities.')
+      if(JSON.stringify(structure(before))!==JSON.stringify(structure(written)))throw new Error('Suggestion changes specification structure. Use the editor to rename, split or add entities.')
     } else if(JSON.stringify(informalEntities(before).map(e=>e.locator).sort())!==JSON.stringify(informalEntities(after).map(e=>e.locator).sort()))throw new Error('Suggestion changes requirement structure. Use the editor to rename, split or add requirements.')
-    changes.push({path,side:source.side,before,after})
+    changes.push({path,side:source.side,before,after:written})
   }
   const documents=sources.map(d=>({...d,content:changes.find(c=>c.path===d.path)?.after??d.content}))
   const path=proposal.direction==='hybrid'?pair.hybridPath:pair.informalPath

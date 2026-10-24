@@ -13,8 +13,8 @@ export function traceNotification(doc: TraceDocument, link: TraceLink, receiving
 
 export interface GeneratedTraceLink { sourceId: string; targetId: string; relation?: string }
 
-/** Resolve provenance against the post-patch index before allowing any source write. */
-export function bindGeneratedTrace(before: TraceDocument, after: TraceDocument, links: GeneratedTraceLink[], sourcePath: string, targetPath: string, id: () => string): void {
+/** Bind what can be resolved. Unresolved provenance is a warning; the specification text is still kept. */
+export function bindGeneratedTraceSoft(before: TraceDocument, after: TraceDocument, links: GeneratedTraceLink[], sourcePath: string, targetPath: string, id: () => string): { warnings: string[] } {
   const normalize = (p: string) => p.replace(/\\/g, '/').toLowerCase()
   const inFile = (path: string | undefined, expected: string) => !path || normalize(path) === normalize(expected) || normalize(expected).endsWith('/' + normalize(path))
   const hybrid = after.entities.filter(e => e.present && e.side === 'hybrid' && inFile(e.documentPath, targetPath))
@@ -54,7 +54,14 @@ export function bindGeneratedTrace(before: TraceDocument, after: TraceDocument, 
   const problems: string[] = []
   if (unresolved.length) problems.push(`Generation provenance is unresolved: ${unresolved.join('; ')}. Return exact source and target IDs before applying.`)
   if (missing.length) problems.push(`Missing generation provenance for ${missing.join(', ')}. Include its Informal source ID in traceLinks; existing nodes keep their links.`)
-  if (problems.length) throw new Error(problems.join(' ') + ' Target IDs: proc:/type:/var:/const:/fn:Module.Name, inv:Module.<zero-based index>; module scaffolding (mod:) needs no link.')
+  const hint = ' Target IDs: proc:/type:/var:/const:/fn:Module.Name, inv:Module.<zero-based index>; module scaffolding (mod:) needs no link.'
+  return { warnings: problems.length ? [problems.join(' ') + hint] : [] }
+}
+
+/** Resolve provenance against the post-patch index. Throws when any link cannot be bound. */
+export function bindGeneratedTrace(before: TraceDocument, after: TraceDocument, links: GeneratedTraceLink[], sourcePath: string, targetPath: string, id: () => string): void {
+  const soft = bindGeneratedTraceSoft(before, after, links, sourcePath, targetPath, id)
+  if (soft.warnings.length) throw new Error(soft.warnings.join(' '))
 }
 
 /** Exact locator first; then case-insensitive; a named invariant resolves only to the single new invariant of its module. */
@@ -73,6 +80,13 @@ function resolveHybridTarget(hybrid: TraceEntity[], targetId: string, isNew: (e:
     if (/^\d+$/.test(suffix)) {
       const byIndex = inMod.filter(e => canonicalLocator(e.locator) === canonicalLocator(targetId))
       if (byIndex.length) return byIndex
+      const idx = parseInt(suffix, 10)
+      const sorted = [...inMod].sort((a, b) => {
+        const ai = parseInt(/^inv:[^.]+\.(\d+)$/i.exec(a.locator)?.[1] ?? '0', 10)
+        const bi = parseInt(/^inv:[^.]+\.(\d+)$/i.exec(b.locator)?.[1] ?? '0', 10)
+        return ai - bi
+      })
+      if (sorted[idx]) return [sorted[idx]!]
     }
     const fresh = inMod.filter(isNew)
     if (fresh.length === 1) return fresh

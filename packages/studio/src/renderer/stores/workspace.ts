@@ -15,6 +15,7 @@ import { type EditorDocumentKind } from '../../shared/textSearch'
 import { refreshGitFor } from '../composables/useGitStatus'
 import { consumeAgentLaunchPending, emitAgentLaunch } from '../lib/agentLaunchBus'
 import { useModalStore } from './modal'
+import { useHistoryStore } from './history'
 import { i18n } from '../i18n'
 import type { SpecMapKind } from '@agile-sofl/editor-api'
 
@@ -210,6 +211,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function persistDirtyDocuments(): Promise<boolean> {
+    await useHistoryStore().flushRegistered()
     for (const tab of doc.documentTabs.filter((t) => t.isDirty)) {
       let path = tab.filePath
       const ext =
@@ -222,19 +224,33 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       doc.markSaved(tab.id, path, path.split(/[/\\]/).pop() ?? tab.title)
       if (tab.documentKind === 'asfl') await markHybridSaved(path)
     }
+    const root = activeProject.value?.rootPath
+    if (root) void refreshGitFor(root)
     return true
   }
 
-  async function confirmLeaveActiveProject(): Promise<boolean> {
+  async function confirmLeaveActiveProject(
+    unsavedMessageKey:
+      | 'workspace.switch.unsavedMessage'
+      | 'dialog.unsaved.projectQuitMessage' = 'workspace.switch.unsavedMessage'
+  ): Promise<boolean> {
     if (!activeProjectId.value) return true
     const modal = useModalStore()
     if (agentBusy.value) {
+      const abortMessageKey =
+        unsavedMessageKey === 'dialog.unsaved.projectQuitMessage'
+          ? 'workspace.quit.abortAgentMessage'
+          : 'workspace.switch.abortAgentMessage'
+      const abortButtonKey =
+        unsavedMessageKey === 'dialog.unsaved.projectQuitMessage'
+          ? 'workspace.quit.abortAndQuit'
+          : 'workspace.switch.abortAndSwitch'
       const { index } = await modal.show({
         title: tKey('workspace.switch.abortAgentTitle'),
-        message: tKey('workspace.switch.abortAgentMessage', {
+        message: tKey(abortMessageKey, {
           name: activeProject.value?.name ?? ''
         }),
-        buttons: [tKey('workspace.switch.abortAndSwitch'), tKey('workspace.cancel')],
+        buttons: [tKey(abortButtonKey), tKey('workspace.cancel')],
         buttonVariants: ['warning', 'default']
       })
       if (index !== 0) return false
@@ -244,9 +260,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!dirty.length) return true
     const { index } = await modal.show({
       title: tKey('dialog.unsaved.title'),
-      message: tKey('workspace.switch.unsavedMessage', {
-        name: activeProject.value?.name ?? '',
-        count: dirty.length
+      message: tKey(unsavedMessageKey, {
+        name: activeProject.value?.name ?? ''
       }),
       buttons: [tKey('dialog.unsaved.save'), tKey('dialog.unsaved.dontSave'), tKey('workspace.cancel')]
     })
@@ -678,6 +693,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setColumnWidths,
     markHybridSaved,
     persistUi,
-    resyncModulesFromOpenTabs
+    resyncModulesFromOpenTabs,
+    persistDirtyDocuments,
+    confirmLeaveActiveProject
   }
 })

@@ -45,7 +45,7 @@ export function validateAspec(document: AspecDocument, options?: { bookAlignStri
   const purpose = document.system?.purpose?.trim()
   if (!purpose) {
     diagnostics.push(
-      createDiagnostic(DiagnosticCodes.STYLE_NO_PURPOSE, 'system.purpose is required', 'error', 'system.purpose')
+      createDiagnostic(DiagnosticCodes.STYLE_NO_PURPOSE, 'system.purpose is required', 'warning', 'system.purpose')
     )
   }
 
@@ -55,7 +55,7 @@ export function validateAspec(document: AspecDocument, options?: { bookAlignStri
         createDiagnostic(
           DiagnosticCodes.STYLE_NO_MODULE_DESC,
           `Module '${mod.name}' missing description`,
-          'error',
+          'warning',
           `modules.${mod.id}.description`
         )
       )

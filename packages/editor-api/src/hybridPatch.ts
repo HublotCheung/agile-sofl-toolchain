@@ -117,7 +117,7 @@ export interface HybridPatch {
   target?: 'hybrid'
 }
 
-type OpOk = { ok: true; content: string }
+type OpOk = { ok: true; content: string; warnings?: string[] }
 type OpErr = { ok: false; error: string }
 type OpResult = OpOk | OpErr
 
@@ -163,8 +163,8 @@ function err(error: string): OpErr {
   return { ok: false, error }
 }
 
-function ok(content: string): OpOk {
-  return { ok: true, content }
+function ok(content: string, warnings?: string[]): OpOk {
+  return warnings?.length ? { ok: true, content, warnings } : { ok: true, content }
 }
 
 function unknownId(id: string): OpErr {
@@ -1036,7 +1036,6 @@ function applyReplaceBody(
   if (requested && !requested.bare && !findVisualModule(buildVisualModelTolerant(source), requested.moduleName)) {
     return err(`Unknown module in qualified process target: ${op.id}`)
   }
-  const previouslyParseable = !parse(source).diagnostics.some((d) => d.severity === 'error')
   let resolved = resolveEntity(source, op.id)
   if (!resolved || resolved.kind !== 'process') {
     const created = materializeFromId(source, op.id, { pre: op.pre, post: op.post })
@@ -1046,20 +1045,23 @@ function applyReplaceBody(
   }
   if (!resolved) return unknownId(op.id)
   if (resolved.kind !== 'process') return err(`replace-process-body expects a process id, got ${op.id}`)
-  if (previouslyParseable && op.fsf !== undefined) {
-    const candidate = patchProcessFsfText(source, resolved.name, op.fsf, resolved.moduleName)
-    const errors = parse(candidate).diagnostics.filter((d) => d.severity === 'error')
-    if (errors.length) return err(`Typed FSF replacement rejected before writing: ${errors[0]!.message.slice(0, 240)}`)
-  }
   let next = source
+  const lint: string[] = []
   if (op.pre !== undefined) next = patchProcessCondition(next, resolved.name, 'pre', op.pre)
   if (op.post !== undefined) next = patchProcessCondition(next, resolved.name, 'post', op.post)
   if (op.fsf !== undefined) {
+    const beforeErrors = parse(next).diagnostics.filter((d) => d.severity === 'error')
     const patched = patchProcessFsfText(next, resolved.name, op.fsf, resolved.moduleName)
     if (patched === next) return err(`Cannot write FSF for process ${resolved.name}`)
+    const errors = parse(patched).diagnostics.filter((d) => d.severity === 'error')
+    if (errors.length > beforeErrors.length) {
+      lint.push(
+        `FSF written with syntax issues: ${errors[0]!.message.slice(0, 240)}. The write was kept; fix the diagnostics.`
+      )
+    }
     next = patched
   }
-  return ok(next)
+  return ok(next, lint)
 }
 
 function isRealModuleName(name: string): boolean {
@@ -1154,14 +1156,24 @@ function applyOp(source: string, op: HybridPatchOp): OpResult {
   }
 }
 
-export function applyHybridPatch(source: string, patch: HybridPatch): { content: string; error?: string; warnings?: string[] } {
+export function applyHybridPatch(
+  source: string,
+  patch: HybridPatch
+): {
+  content: string
+  error?: string
+  warnings?: string[]
+  opFailures?: string[]
+  lintWarnings?: string[]
+} {
   let content = source
   let protectedNames = namedModuleNames(source)
-  const warnings: string[] = []
+  const opFailures: string[] = []
+  const lintWarnings: string[] = []
   for (const op of patch.operations) {
     const result = applyOp(content, op)
     if (!result.ok) {
-      warnings.push(result.error)
+      opFailures.push(result.error)
       continue
     }
     const nextNames = namedModuleNames(result.content)
@@ -1180,7 +1192,7 @@ export function applyHybridPatch(source: string, patch: HybridPatch): { content:
         ('kind' in op && op.kind ? `${op.op} ${op.kind}` : op.op) +
         ('name' in op && op.name ? ` ${op.name}` : '') +
         ('id' in op && op.id ? ` ${op.id}` : '')
-      warnings.push(
+      opFailures.push(
         `Skipped ${label.trim()}: would drop modules (${lost.join(', ') || 'all'}). Keep existing modules and use CRUD ids.`
       )
       continue
@@ -1192,14 +1204,30 @@ export function applyHybridPatch(source: string, patch: HybridPatch): { content:
         ('kind' in op && op.kind ? `${op.op} ${op.kind}` : op.op) +
         ('name' in op && op.name ? ` ${op.name}` : '') +
         ('id' in op && op.id ? ` ${op.id}` : '')
-      warnings.push(`Skipped ${label.trim()}: ${leftoverAfter}`)
+      opFailures.push(`Skipped ${label.trim()}: ${leftoverAfter}`)
       continue
     }
     content = result.content
+    if (result.warnings?.length) lintWarnings.push(...result.warnings)
     if (nextNames.length) protectedNames = nextNames
   }
   const leftover = hybridLeftoverMessage(content)
-  if (leftover) warnings.push(leftover)
+  if (leftover) lintWarnings.push(leftover)
+  const warnings = [...opFailures, ...lintWarnings]
+  if (content === source && opFailures.length) {
+    return {
+      content,
+      error: opFailures.join('; '),
+      warnings,
+      opFailures,
+      lintWarnings: lintWarnings.length ? lintWarnings : undefined
+    }
+  }
   if (!warnings.length) return { content }
-  return { content, error: warnings.join('; '), warnings }
+  return {
+    content,
+    warnings,
+    opFailures: opFailures.length ? opFailures : undefined,
+    lintWarnings: lintWarnings.length ? lintWarnings : undefined
+  }
 }

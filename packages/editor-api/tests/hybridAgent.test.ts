@@ -344,13 +344,14 @@ end_module`
   })
 
   it('keeps successful ops when one id is unknown after adaptation', () => {
-    const { content, error } = applyHybridPatch(SOURCE, {
+    const { content, error, warnings } = applyHybridPatch(SOURCE, {
       operations: [
         { op: 'add', kind: 'type', parentId: 'mod:Demo', name: 'Account', text: 'nat' },
         { op: 'remove', id: 'type:Demo.DoesNotExist' }
       ]
     })
     expect(content).toContain('Account = nat')
-    expect(error).toMatch(/Unknown hybrid id|DoesNotExist/)
+    expect(error).toBeUndefined()
+    expect((warnings ?? []).join(' ')).toMatch(/Unknown hybrid id|DoesNotExist/)
   })
 })

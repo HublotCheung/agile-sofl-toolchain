@@ -25,7 +25,11 @@ import type { ProcessEditorDraft } from './ProcessEditor.vue'
 import { useModalStore } from '../../../stores/modal'
 import ResizableSplit from '../../ui/ResizableSplit.vue'
 import type { SymbolHint } from './predicate/predicateTypes'
-import type { ProcessNodeMeta } from '@agile-sofl/editor-api'
+import {
+  adjustRefinementDiagnosticSeverity,
+  hasBlockingHybridDiagnostics,
+  type ProcessNodeMeta
+} from '@agile-sofl/editor-api'
 import {
   composedTypeText,
   nextFieldName,
@@ -83,6 +87,12 @@ const modules = computed(() => visual.model.value?.modules ?? [])
 const diagnostics = computed(
   () => (visual.model.value?.diagnostics ?? []) as DiagnosticSummary[]
 )
+const lintDiagnostics = computed(() =>
+  adjustRefinementDiagnosticSeverity(diagnostics.value, editorUi.fsfStrictMode)
+)
+const hybridHasBlockingLint = computed(() =>
+  hasBlockingHybridDiagnostics(lintDiagnostics.value, editorUi.fsfStrictMode)
+)
 
 watch(selected, (value) => {
   editorSelection.setSelection(value)
@@ -110,13 +120,14 @@ watch(
 )
 
 const parseBlocked = computed(() => visual.parseFailed.value)
-const editBlocked = computed(() => visual.parseFailed.value || visual.hasDiagnostics.value)
+/** Only a hard parse failure blocks visual edits; syntax diagnostics are shown as warnings. */
+const editBlocked = computed(() => visual.parseFailed.value)
 /** @deprecated use parseBlocked / editBlocked */
 const writeDisabled = editBlocked
 
 const writeDisabledReason = computed<'parseFailed' | 'diagnostics' | null>(() => {
   if (visual.parseFailed.value) return 'parseFailed'
-  if (visual.hasDiagnostics.value) return 'diagnostics'
+  if (hybridHasBlockingLint.value) return 'diagnostics'
   return null
 })
 
@@ -371,17 +382,33 @@ async function onPatchProcess(payload: {
 
 async function onPatchInvariant(payload: { index: number; text: string }): Promise<void> {
   if (writeDisabled.value || !selectedModule.value) return
-  await visual.patchInvariant({
-    action: 'patch',
-    moduleName: selectedModule.value.name,
-    index: payload.index,
-    text: payload.text
-  })
+  try {
+    await visual.patchInvariant({
+      action: 'patch',
+      moduleName: selectedModule.value.name,
+      index: payload.index,
+      text: payload.text
+    })
+  } catch (e) {
+    await modal.show({
+      title: t('visual.inv.editTitle'),
+      message: e instanceof Error ? e.message : String(e),
+      buttons: [t('dialog.ok')]
+    })
+  }
 }
 
 async function onAddInvariant(text: string): Promise<void> {
   if (writeDisabled.value || !selectedModule.value) return
-  await visual.patchInvariant({ action: 'add', moduleName: selectedModule.value.name, text })
+  try {
+    await visual.patchInvariant({ action: 'add', moduleName: selectedModule.value.name, text })
+  } catch (e) {
+    await modal.show({
+      title: t('visual.inv.createTitle'),
+      message: e instanceof Error ? e.message : String(e),
+      buttons: [t('dialog.ok')]
+    })
+  }
 }
 
 async function onRemoveInvariant(index: number): Promise<void> {
@@ -838,8 +865,8 @@ defineExpose({ setSelection })
       @reveal-span="emit('revealSpan', $event)"
     />
     <ParseErrorBanner
-      v-else-if="visual.hasDiagnostics.value && !visual.parseFailed.value"
-      :diagnostics="diagnostics"
+      v-else-if="hybridHasBlockingLint && !visual.parseFailed.value"
+      :diagnostics="lintDiagnostics"
       compact
       :message="t('visual.parseWarning')"
       @reveal-span="emit('revealSpan', $event)"
@@ -854,7 +881,7 @@ defineExpose({ setSelection })
     <VisualToolbar
       :selection="selected"
       :parse-failed="visual.parseFailed.value"
-      :has-diagnostics="visual.hasDiagnostics.value"
+      :has-diagnostics="hybridHasBlockingLint"
       :loading="visual.loading.value"
       :syncing="visual.syncing.value"
       :search-query="searchQuery"
@@ -908,7 +935,7 @@ defineExpose({ setSelection })
           :selected="selected"
           :search-query="searchQuery"
           :parse-failed="visual.parseFailed.value"
-          :has-diagnostics="visual.hasDiagnostics.value"
+          :has-diagnostics="hybridHasBlockingLint"
           @select="selected = $event"
           @reveal-span="emit('revealSpan', $event)"
           @contextmenu="openContextMenu"
@@ -991,7 +1018,7 @@ defineExpose({ setSelection })
       :y="contextMenu.y"
       :selection="contextMenu.selection"
       :parse-failed="visual.parseFailed.value"
-      :has-diagnostics="visual.hasDiagnostics.value"
+      :has-diagnostics="hybridHasBlockingLint"
       @action="onContextAction"
       @close="closeContextMenu"
     />

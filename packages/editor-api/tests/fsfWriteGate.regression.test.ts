@@ -17,13 +17,15 @@ describe('typed FSF write acceptance', () => {
     expect(result.content).toBe(source)
   })
 
-  it('keeps a parseable source when the replacement FSF has an invalid Boolean RHS', () => {
+  it('keeps an invalid Boolean FSF and reports it as a lint warning', () => {
     expect(parseSpecification(source).diagnostics.filter(d => d.severity === 'error')).toEqual([])
     const result = applyHybridPatch(source, { operations: [
       { op: 'replace-process-body', id: 'proc:A.Cancel', fsf: 'others && y = not (x >= 1)' }
     ] })
-    expect(result.error).toMatch(/rejected before writing/)
-    expect(result.content).toBe(source)
+    expect(result.error).toBeUndefined()
+    expect(result.content).toContain('not (x >= 1)')
+    expect(result.content).not.toBe(source)
+    expect(result.lintWarnings?.join(' ') ?? result.warnings?.join(' ')).toMatch(/syntax issues|kept/i)
   })
 
   it('accepts a matching process-name label as an FSF payload prefix', () => {
@@ -35,7 +37,7 @@ describe('typed FSF write acceptance', () => {
     expect(parseSpecification(result.content).diagnostics.filter(d => d.severity === 'error')).toEqual([])
   })
 
-  it('reports a failed second replacement while retaining the first applied change', () => {
+  it('keeps both FSF replacements, including a later invalid one, and warns', () => {
     const first = applyHybridPatch(source, { operations: [
       { op: 'replace-process-body', id: 'proc:A.Cancel', fsf: 'others && y = x + 1' }
     ] })
@@ -43,9 +45,10 @@ describe('typed FSF write acceptance', () => {
       { op: 'replace-process-body', id: 'proc:A.Cancel', fsf: 'others && y = x + 1' },
       { op: 'replace-process-body', id: 'proc:A.Cancel', fsf: 'others && y = not (x >= 1)' }
     ] })
-    expect(result.error).toBeTruthy()
-    expect(result.content).toBe(first.content)
+    expect(result.error).toBeUndefined()
     expect(result.content).not.toBe(source)
-    expect(parseSpecification(result.content).diagnostics.filter(d => d.severity === 'error')).toEqual([])
+    expect(result.content).not.toBe(first.content)
+    expect(result.content).toContain('not (x >= 1)')
+    expect(result.warnings?.length).toBeGreaterThan(0)
   })
 })

@@ -49,7 +49,13 @@ export type {
   ModuleSpanIndex
 } from './filterDiagnostics.js'
 
-export { mergeDiagnostics, countBySeverity, adjustFsfDiagnosticSeverity } from './mergeDiagnostics.js'
+export {
+  mergeDiagnostics,
+  countBySeverity,
+  adjustFsfDiagnosticSeverity,
+  adjustRefinementDiagnosticSeverity,
+  hasBlockingHybridDiagnostics
+} from './mergeDiagnostics.js'
 export type { MergedDiagnostic, DiagnosticSource } from './mergeDiagnostics.js'
 
 export {
@@ -197,7 +203,13 @@ export {
 } from './hybridIds.js'
 export type { HybridIdKind, ParsedHybridId } from './hybridIds.js'
 
-export { formatHybridInventory, hybridInventoryFromSource, formatHybridDiagnostics, collectHybridAgentDiagnostics } from './hybridInventory.js'
+export {
+  formatHybridInventory,
+  hybridInventoryFromSource,
+  formatHybridDiagnostics,
+  collectHybridAgentDiagnostics,
+  collectHybridWriteLintDiagnostics
+} from './hybridInventory.js'
 export type { HybridAgentDiagnostic } from './hybridInventory.js'
 
 export { applyHybridPatch } from './hybridPatch.js'

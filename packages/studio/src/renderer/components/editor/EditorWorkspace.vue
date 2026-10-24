@@ -15,6 +15,7 @@ import {
   mergeDiagnostics,
   filterDiagnosticsBySelection,
   adjustFsfDiagnosticSeverity,
+  adjustRefinementDiagnosticSeverity,
   type MergedDiagnostic
 } from '@agile-sofl/editor-api'
 import type { CoverageReportPayload, DiagnosticSummary } from '../../preload/index'
@@ -79,8 +80,11 @@ const informalDiagnostics = computed((): MergedDiagnostic[] => {
 const unifiedDiagnostics = computed((): MergedDiagnostic[] => {
   if (!isDocumentActive.value) return []
   if (isAspec.value) return informalDiagnostics.value
-  const visualItems = adjustFsfDiagnosticSeverity(
-    (visual.diagnostics.value ?? []) as DiagnosticSummary[],
+  const visualItems = adjustRefinementDiagnosticSeverity(
+    adjustFsfDiagnosticSeverity(
+      (visual.diagnostics.value ?? []) as DiagnosticSummary[],
+      editorUi.fsfStrictMode
+    ) as DiagnosticSummary[],
     editorUi.fsfStrictMode
   ) as DiagnosticSummary[]
   return mergeDiagnostics(visualItems, lspDiagnostics.markers)

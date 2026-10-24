@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { InformalPatchPayload } from '../../../../preload/index'
 import { groupPatchOperations, sectionStartsOpen } from './patchSections'
+import { formatAgentToolError } from './agentToolUx'
 
 const props = defineProps<{
   patch: InformalPatchPayload
@@ -11,6 +12,7 @@ const props = defineProps<{
   autoApplying?: boolean
   resolution?: 'applied' | 'rejected' | 'answered' | 'error'
   toolError?: string
+  toolWarning?: string
 }>()
 const emit = defineEmits<{ apply: []; reject: [] }>()
 const { t } = useI18n()
@@ -23,6 +25,7 @@ const sections = computed(() => groupPatchOperations(props.patch.operations ?? [
 const sectionOverride = ref<Record<string, boolean>>({})
 const explanationOpen = ref(false)
 const explanationLong = computed(() => (props.patch.explanation ?? '').trim().length > 80)
+const friendlyToolError = computed(() => formatAgentToolError(props.toolError))
 
 function isSectionOpen(id: string, count: number): boolean {
   const value = sectionOverride.value[id]
@@ -141,12 +144,20 @@ function tone(op: Record<string, unknown>): string {
             : $t('agent.applied')
       }}
     </p>
+    <p v-if="resolution === 'applied' && toolWarning" class="mt-1 whitespace-pre-wrap break-words text-[12px] text-semantic-warning">
+      {{ $t('agent.appliedWithLint') }}
+      <span class="mt-1 block font-normal">{{ toolWarning }}</span>
+    </p>
     <p v-else-if="resolution === 'rejected'" class="mt-1 text-[12px] text-content-secondary">{{ $t('agent.rejected') }}</p>
     <p v-else-if="resolution === 'error'" class="mt-1 text-[12px] text-semantic-error">
       {{ $t('agent.patchToolFailed') }}
       <span v-if="toolError" class="mt-1 block whitespace-pre-wrap break-words font-normal text-semantic-error">{{
-        toolError
+        friendlyToolError
       }}</span>
+      <span
+        v-if="toolError && friendlyToolError !== toolError"
+        class="mt-1 block whitespace-pre-wrap break-words font-mono text-[11px] text-content-muted"
+      >{{ toolError }}</span>
     </p>
     <p v-else-if="autoApplying" class="mt-1 text-[12px] text-content-secondary">{{ $t('agent.autoApplying') }}</p>
     <p

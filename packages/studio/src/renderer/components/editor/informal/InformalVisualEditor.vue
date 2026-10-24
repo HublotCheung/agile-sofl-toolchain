@@ -12,6 +12,8 @@ import InformalProcessCard from './InformalProcessCard.vue'
 import InformalFunctionCard from './InformalFunctionCard.vue'
 import BookAlignCard from './BookAlignCard.vue'
 import InformalToolbar from './InformalToolbar.vue'
+import ParseErrorBanner from '../visual/ParseErrorBanner.vue'
+import { nextInvariantPlaceholder } from '../../../lib/visualNames'
 
 const { t } = useI18n()
 const doc = useDocumentStore()
@@ -69,7 +71,8 @@ const selectedFunction = computed(() =>
   selectedModule.value?.functions?.find((f) => f.id === selectedFunctionId.value) ?? null
 )
 
-const writeDisabled = computed(() => informal.hasErrors.value)
+const writeDisabled = computed(() => informal.parseBlocked.value)
+const informalDiagnostics = computed(() => informal.model.value?.diagnostics ?? [])
 
 function newId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}`
@@ -157,6 +160,17 @@ function patchStakeholders(raw: string): void {
     </div>
     <GuiVisualEditor v-if="panelMode === 'gui'" embedded />
     <template v-else>
+    <ParseErrorBanner
+      v-if="informal.hasErrors.value && !informal.parseBlocked.value"
+      :diagnostics="informalDiagnostics"
+      compact
+      :message="t('informal.visualHasIssues')"
+    />
+    <ParseErrorBanner
+      v-else-if="informal.parseBlocked.value"
+      :diagnostics="informalDiagnostics"
+      :message="t('informal.visualParseBlocked')"
+    />
     <InformalToolbar
       :disabled="writeDisabled"
       :show-remove-process="Boolean(selectedProcess)"
@@ -231,7 +245,14 @@ function patchStakeholders(raw: string): void {
           @patch="onPatch"
           @add-type="informal.addType(selectedModule!.id, { id: newId('type'), name: 'NewType', typeHint: 'nat' })"
           @add-variable="informal.addVariable(selectedModule!.id, { id: newId('var'), name: 'new_var', typeHint: 'nat' })"
-          @add-invariant="informal.addInvariant(selectedModule!.id, { id: newId('inv'), textHint: 'true' })"
+          @add-invariant="
+            informal.addInvariant(selectedModule!.id, {
+              id: newId('inv'),
+              textHint: nextInvariantPlaceholder(
+                (selectedModule!.invariants ?? []).map((i) => i.textHint ?? i.description ?? '')
+              )
+            })
+          "
           @add-constant="informal.addConstant(selectedModule!.id, { id: newId('const'), name: 'new_const', valueHint: '0' })"
           @remove-type="(id) => informal.removeType(selectedModule!.id, id)"
           @remove-variable="(id) => informal.removeVariable(selectedModule!.id, id)"

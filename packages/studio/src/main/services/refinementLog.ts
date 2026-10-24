@@ -54,14 +54,20 @@ export function applyProjectRefinementStep(
   projectRoot: string,
   source: string,
   step: RefinementStep
-): ReturnType<typeof applyRefinementStep> & { repairNotes?: string[] } {
+): ReturnType<typeof applyRefinementStep> & { repairNotes?: string[]; warnings?: string[] } {
   const log = readRefinementLog(projectRoot)
   const result = applyRefinementStep(source, log, step, informalGrainNotes(projectRoot))
-  if (result.error) return result
+  if (result.error && result.source === source) return result
   const gated = acceptHybridWrite(source, result.source)
-  if (!gated.ok) return { ...result, source, log, error: gated.error }
-  writeRefinementLog(projectRoot, result.log)
-  return { ...result, source: gated.content, repairNotes: gated.repairNotes }
+  if (gated.content !== source) writeRefinementLog(projectRoot, result.log)
+  const lint = [...(result.error && result.source !== source ? [result.error] : []), ...(gated.warnings ?? [])]
+  return {
+    ...result,
+    source: gated.content,
+    repairNotes: gated.repairNotes,
+    warnings: lint.length ? lint : undefined,
+    error: gated.content === source ? result.error ?? (lint.length ? lint.join('; ') : undefined) : undefined
+  }
 }
 
 export function projectRefinementState(projectRoot: string, source: string) {

@@ -242,7 +242,7 @@ export function applyInformalPatch(
         diagnostics.push({
           code: 'ASPEC_PATCH_001',
           message: `Cannot add node: unknown target "${op.target}".`,
-          severity: 'error',
+          severity: 'warning',
           path: String(op.target)
         })
       }
@@ -252,7 +252,7 @@ export function applyInformalPatch(
         diagnostics.push({
           code: 'ASPEC_PATCH_001',
           message: `Cannot update unknown node "${op.id}".`,
-          severity: 'error',
+          severity: 'warning',
           path: op.id
         })
         continue
@@ -267,7 +267,7 @@ export function applyInformalPatch(
         diagnostics.push({
           code: 'ASPEC_PATCH_001',
           message: `Cannot remove unknown node "${op.id}".`,
-          severity: 'error',
+          severity: 'warning',
           path: op.id
         })
       }
@@ -277,7 +277,7 @@ export function applyInformalPatch(
         diagnostics.push({
           code: 'ASPEC_PATCH_001',
           message: `Cannot move unknown node "${op.id}".`,
-          severity: 'error',
+          severity: 'warning',
           path: op.id
         })
         continue
@@ -288,7 +288,7 @@ export function applyInformalPatch(
         diagnostics.push({
           code: 'ASPEC_PATCH_001',
           message: `Cannot move "${op.id}" under itself.`,
-          severity: 'error',
+          severity: 'warning',
           path: op.id
         })
         continue
@@ -298,7 +298,7 @@ export function applyInformalPatch(
         diagnostics.push({
           code: 'ASPEC_PATCH_001',
           message: `Cannot move unknown node "${op.id}".`,
-          severity: 'error',
+          severity: 'warning',
           path: op.id
         })
         continue
@@ -308,7 +308,7 @@ export function applyInformalPatch(
         diagnostics.push({
           code: 'ASPEC_PATCH_001',
           message: `Cannot move node to unknown parent "${op.parentId}".`,
-          severity: 'error',
+          severity: 'warning',
           path: String(op.parentId)
         })
       }
@@ -322,7 +322,7 @@ export function applyInformalPatch(
 export function applyInformalSourcePatch(
   source: string,
   patch: InformalPatch
-): { content: string; ok: boolean; error?: string } {
+): { content: string; ok: boolean; error?: string; warnings?: string[] } {
   let spec
   if (detectAspecFormat(source) === 'yaml') {
     const { document } = parseAspec(source)
@@ -336,11 +336,15 @@ export function applyInformalSourcePatch(
     spec = parsed.specification
   }
   const { spec: next, diagnostics } = applyInformalPatch(spec, patch)
-  const patchError = diagnostics.find((d) => d.severity === 'error' && d.code === 'ASPEC_PATCH_001')
-  if (patchError) {
-    return { content: source, ok: false, error: patchError.message }
+  const content = serializeInformalSpec(next)
+  const warnings = diagnostics
+    .filter((d) => d.severity === 'error' || d.severity === 'warning')
+    .map((d) => (d.code === 'ASPEC_PATCH_001' ? d.message : `${d.code} ${d.message}`))
+  const changed = content !== source
+  if (!changed && warnings.length) {
+    return { content: source, ok: false, error: warnings.join('; '), warnings }
   }
-  return { content: serializeInformalSpec(next), ok: true }
+  return { content, ok: true, warnings: warnings.length ? warnings : undefined }
 }
 
 export function patchInformalSource(source: string, patch: InformalPatch): string {

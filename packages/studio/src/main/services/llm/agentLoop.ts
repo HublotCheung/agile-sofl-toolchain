@@ -15,13 +15,20 @@ import { newId, normalizePermissions, type AgentSpecPermissions } from './agentT
 import { saveSession as writeSession } from './sessionStore'
 import { informalInventoryFromMarkdown } from '@agile-sofl/aspec/dist/informal/inventory.js'
 import { announceCondition, getExperimentConfig, logTelemetry, semanticDiagnostics, diagnosticCounts } from './experiment'
-import { formatHybridInventory, formatHybridDiagnostics, collectHybridAgentDiagnostics, formatRefinementDigest } from '@agile-sofl/editor-api'
+import {
+  adjustRefinementDiagnosticSeverity,
+  formatHybridInventory,
+  formatHybridDiagnostics,
+  collectHybridAgentDiagnostics,
+  formatRefinementDigest
+} from '@agile-sofl/editor-api'
 import { formatGuiInventory, numberedGuiSource } from '@agile-sofl/gui'
 import { formatClarificationToolContent } from '../../../shared/clarificationAnswer'
 import { normalizeHybridPatch } from '../../../shared/asflRepair'
 import { numberedSource } from '../../../shared/sourceEdit.js'
 import { projectRefinementState } from '../refinementLog.js'
 import {
+  appendAgentToolWarning,
   appliedToolResult,
   assistantTurnIsComplete,
   continuationUserText,
@@ -189,17 +196,20 @@ async function hybridDiagnosticsWithSemantic(asfl: string | undefined, cfg: Retu
   try {
     semantic = await semanticDiagnostics(asfl ?? '', cfg)
   } catch { /* semantic checks are best-effort */ }
-  const items: Array<Record<string, unknown>> = [
-    ...base.items,
-    ...semantic.map((d) => ({
-      severity: d.severity,
-      code: d.code,
-      source: /^ASFL_FSF_1/.test(d.code) ? 'L1' : 'L2',
-      line: d.span.line,
-      column: d.span.column,
-      message: d.message
-    }))
-  ]
+  const items: Array<Record<string, unknown>> = adjustRefinementDiagnosticSeverity(
+    [
+      ...base.items,
+      ...semantic.map((d) => ({
+        severity: d.severity,
+        code: d.code,
+        source: /^ASFL_FSF_1/.test(d.code) ? 'L1' : 'L2',
+        line: d.span.line,
+        column: d.span.column,
+        message: d.message
+      }))
+    ] as Array<{ severity: string; code: string }>,
+    false
+  ) as Array<Record<string, unknown>>
   return {
     count: items.length,
     errors: items.filter((d) => d.severity === 'error').length,
@@ -312,7 +322,7 @@ node names are processes in that module; store names are vars; ports match the p
     ? `Dual-line refinement (guide the user; do not auto-refine the whole tree):
 - Journey: Informal → Hybrid+GUI → process atomicity + data discharge + operational grain until the refinement digest reports unambiguous=true.
 - Operational grain: a leaf is not atomic just because pre/post are formal. If the digest lists variations or a name-claim, ask_clarification about those extracted items only, then ClassifyGrain or ResolveVariation. Do not invent operations, and do not clear grainAmbiguity by rewriting pre/post.
-- Predicate text must lex as ASFL. There is no VDM post-state prime and no ^. The final value is the bare name (~x is the initial value). Sequence append is conc(seq, elem). != is <>. Studio rewrites a trailing prime and a clear ^ before the write is kept, and it refuses a write that would add syntax errors. If a tool result says the write was not kept or a patch already failed, rewrite that fragment and re-propose. Do not retry the identical text and do not stop.
+- Predicate text should lex as ASFL. There is no VDM post-state prime and no ^. The final value is the bare name (~x is the initial value). Sequence append is conc(seq, elem). != is <>. Studio rewrites a trailing prime and a clear ^ and then keeps the write even if Diagnostics remain. A tool result with action "applied" succeeded; warnings and diagnostics are lint, not a failed write. Call read_* and patch the remaining issues. Do not retry the identical text and do not stop.
 - Empty name-only modules and stub (name-only) processes are gaps. Hybrid generation does not finish the specification.
 - After Hybrid/GUI work for this turn is done, if unambiguous=false, ask_clarification with 2–4 next slices from the digest. Wait for the user unless they already named a slice.
 - Prefer propose_refinement_step, then propose_hybrid_changes. Fallback: propose_source_edit on Hybrid.
@@ -342,7 +352,7 @@ ${toolLines.join('\n')}
 Agile-SOFL conventions:
 - There is exactly one system module. Name it SYSTEM_<SystemName> after the whole product (e.g. SYSTEM_FoodDelivery). It is the root; every other module is a child: module Auth / FoodDelivery;
 - SYSTEM_ is listed first in the .asfl file. Do not treat GUI_App or a feature module as the system module.
-- A GUI module is a Hybrid child (module GUI_App / System;). gui.html is the prototype, not the module. If the user asks for a GUI module or prototype and none exists, add empty GUI_App with propose_hybrid_changes before any screen. propose_gui_changes is rejected until that module exists. Do not ask again after the user already requested it. Never add sample OpenNext/OpenHome processes. Generation parameter GUI=false is the only case that skips the module.
+- A GUI module is a Hybrid child (module GUI_App / System;). gui.html is the prototype, not the module. If the user asks for a GUI module or prototype and none exists, add empty GUI_App with propose_hybrid_changes before any screen. propose_gui_changes may warn until that module exists; still prefer adding GUI_App first. Do not ask again after the user already requested it. Never add sample OpenNext/OpenHome processes. Generation parameter GUI=false is the only case that skips the module.
 - Processes without known ports use signature (). Inventing (x: nat) ok: nat is wrong.
 - There is no implication operator: write not A or B instead. Process logic is written as FSF: FSF : T1 && D1 || T2 && D2 || … || others && Dn.
 - GUI is a walkable high-fidelity prototype, not a wireframe of a few buttons.
@@ -954,16 +964,10 @@ export async function runAgentTurn(
           if (target === 'gui') {
             const gate = missingHybridGuiModule(ctx.hybridAsfl)
             if (gate.missing) {
-              const error = guiModuleRequiredError(gate.parentId)
-              session.messages.push({
-                id: call.id,
-                role: 'tool',
-                content: JSON.stringify({ ok: false, error, next: error }),
-                timestamp: new Date().toISOString()
-              })
-              live.content = live.content || error
-              markCallStatus(live, call.id, 'error', sink)
-              continue
+              live.toolWarning = appendAgentToolWarning(
+                live.toolWarning,
+                `${guiModuleRequiredError(gate.parentId)} You can still preview GUI changes; add module GUI_App via propose_hybrid_changes when ready.`
+              )
             }
           }
           let patch: InformalPatchPayload =
@@ -1032,86 +1036,50 @@ export async function runAgentTurn(
             const normalized = normalizeHybridPatch(patch)
             patch = normalized.patch
             if (normalized.unresolved) {
-              const error = `Could not auto-repair illegal ASFL (${normalized.unresolved}).`
-              session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
-                fingerprint: patchFingerprint(patch),
-                error,
-                mode
-              })
-              session.messages.push({
-                id: call.id,
-                role: 'tool',
-                content: JSON.stringify({
-                  ok: false,
-                  error,
-                  next: 'Rewrite ^ as conc(seq, elem) and drop VDM primes. Re-propose a different patch. Do not stop.'
-                }),
-                timestamp: new Date().toISOString()
-              })
-              live.content = live.content || error
-              markCallStatus(live, call.id, 'error', sink)
-              continue
+              live.toolWarning = appendAgentToolWarning(
+                live.toolWarning,
+                `Could not auto-repair illegal ASFL (${normalized.unresolved}). The patch is still offered — apply and fix in a follow-up, or rewrite ^ / VDM primes before apply.`
+              )
             }
           }
-          const blocked = crudBlockedByFailures(session.context.lastFailedWrite, {
+          const repeatHint = crudBlockedByFailures(session.context.lastFailedWrite, {
             fingerprint: patchFingerprint(patch),
             mode
           })
-          if (blocked) {
-            session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
-              fingerprint: patchFingerprint(patch),
-              error: blocked,
-              mode
-            })
-            session.messages.push({
-              id: call.id,
-              role: 'tool',
-              content: JSON.stringify({
-                ok: false,
-                error: blocked,
-                next: 'Do not retry the same CRUD. Call read_* with view=source, then propose_source_edit.'
-              }),
-              timestamp: new Date().toISOString()
-            })
-            live.content = live.content || `Patch rejected: ${blocked}`
-            markCallStatus(live, call.id, 'error', sink)
-            continue
+          if (repeatHint) {
+            live.toolWarning = appendAgentToolWarning(live.toolWarning, repeatHint)
           }
           const validity = validateAgentPatch(target, patch, { mode })
-          if (!validity.ok) {
-            const emptyPatch = !Array.isArray(patch.operations) || patch.operations.length === 0
-            if (!emptyPatch) {
-              session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
-                fingerprint: patchFingerprint(patch),
-                error: validity.message,
-                mode
-              })
-            }
+          if (!validity.accept) {
             session.messages.push({
               id: call.id,
               role: 'tool',
               content: JSON.stringify({
                 ok: false,
                 error: validity.message,
-                next:
-                  mode === 'source'
-                    ? 'Fix the source-edit operations (unique oldText, or append / replace-document). Do not stop.'
-                    : 'Tool rejected that patch. Read the inventory, or view=source then propose_source_edit. Do not stop.'
+                next: 'Send a non-empty patch (at least one operation). Do not stop.'
               }),
               timestamp: new Date().toISOString()
             })
-            live.content = live.content || `Patch rejected: ${validity.message}`
+            live.content = live.content || validity.message
             markCallStatus(live, call.id, 'error', sink)
             continue
           }
+          if (validity.warnings.length) {
+            live.toolWarning = appendAgentToolWarning(
+              live.toolWarning,
+              `Patch lint: ${validity.warnings.join(' ')} Apply may partially no-op; read_* and follow up.`
+            )
+          }
           if (target === 'hybrid' && ctx.informalMarkdown.trim()) {
-            const sources = new Set(informalEntities(ctx.informalMarkdown).map(e=>e.locator))
-            const createsNodes = patch.operations.some(op=>op.op==='add'&&!['module','gui-screen','scenario'].includes(String(op.kind)))
-            const invalid = patch.traceLinks?.some(l=>!sources.has(l.sourceId)||!l.targetId)
+            const sources = new Set(informalEntities(ctx.informalMarkdown).map((e) => e.locator))
+            const createsNodes = patch.operations.some(
+              (op) => op.op === 'add' && !['module', 'gui-screen', 'scenario'].includes(String(op.kind))
+            )
+            const invalid = patch.traceLinks?.some((l) => !sources.has(l.sourceId) || !l.targetId)
             if (invalid || (createsNodes && sources.size > 0 && !patch.traceLinks?.length)) {
-              session.messages.push({id:call.id,role:'tool',content:JSON.stringify({ok:false,error:'Missing or invalid modeling provenance.',next:'Read the Informal inventory. Re-propose the patch with traceLinks containing exact sourceId and fully qualified targetId for each new semantic node. Fix this yourself; do not ask the user to manage links.'}),timestamp:new Date().toISOString()})
-              markCallStatus(live,call.id,'error',sink)
-              continue
+              live.toolWarning =
+                'Informal ↔ Hybrid provenance (traceLinks) is missing or incomplete. The patch is still offered — apply the Hybrid change and add or fix trace links in a follow-up. Prefer exact sourceId and targetId when you can.'
             }
           }
           live.content =
@@ -1318,6 +1286,8 @@ function parseResumePayload(result: string): {
   error?: string
   userNote?: string
   repair?: string
+  warnings?: string[]
+  diagnostics?: { errors: number; warnings: number; items?: unknown[] }
   type?: string
   text?: string
 } {
@@ -1327,6 +1297,8 @@ function parseResumePayload(result: string): {
       error?: string
       userNote?: string
       repair?: string
+      warnings?: string[]
+      diagnostics?: { errors: number; warnings: number; items?: unknown[] }
       type?: string
       text?: string
     }
@@ -1363,7 +1335,12 @@ export async function resumeWithToolResult(
         event: 'proposal_decision',
         tool: isRefine ? 'propose_refinement_step' : patch.mode === 'source' ? 'propose_source_edit' : `propose_${patch.target ?? 'informal'}_changes`,
         stepType: isRefine ? String(op0?.kind ?? '') : undefined,
-        decision: payload.action === 'applied' && !payload.error ? 'approved' : payload.action === 'rejected' ? 'rejected' : 'error',
+        decision:
+          payload.action === 'applied'
+            ? 'approved'
+            : payload.action === 'rejected'
+              ? 'rejected'
+              : 'error',
         toolCallId
       })
     }
@@ -1376,9 +1353,9 @@ export async function resumeWithToolResult(
         })
       } catch { /* best-effort */ }
     }
-    if (payload.action === 'applied' && !payload.error) {
+    if (payload.action === 'applied') {
       session.context.lastFailedWrite = undefined
-    } else if (payload.action === 'error' || (payload.action === 'applied' && payload.error)) {
+    } else if (payload.action === 'error') {
       session.context.lastFailedWrite = nextFailedWrite(session.context.lastFailedWrite, {
         fingerprint: patchFingerprint(patch),
         error: payload.error || 'Tool failed',
@@ -1399,7 +1376,13 @@ export async function resumeWithToolResult(
   let clarificationDisplay: string | undefined
   if (payload.type === 'user_instruction') toolContent = userInstructionToolResult(payload.text || result)
   else if (payload.action === 'applied')
-    toolContent = appliedToolResult({ error: payload.error, userNote: payload.userNote, repair: payload.repair })
+    toolContent = appliedToolResult({
+      error: payload.error,
+      userNote: payload.userNote,
+      repair: payload.repair,
+      warnings: payload.warnings,
+      diagnostics: payload.diagnostics
+    })
   else if (payload.action === 'error') toolContent = failedToolResult(payload.error || 'Tool failed', payload.userNote)
   else if (payload.action === 'rejected') toolContent = rejectedToolResult()
   else if (clarificationMsg?.clarification) {
@@ -1438,8 +1421,14 @@ export async function resumeWithToolResult(
           const unansweredWrite = !payload.action && pendingWrite
           m.resolution =
             payload.action === 'applied' ? 'applied' : payload.action === 'error' || unansweredWrite ? 'error' : 'rejected'
-          if (payload.error) m.toolError = payload.error
+          if (payload.action === 'error' && payload.error) m.toolError = payload.error
           else if (unansweredWrite) m.toolError = 'Pending change was not applied.'
+          else if (payload.action === 'applied' && (payload.warnings?.length || payload.diagnostics?.errors)) {
+            m.toolWarning = [
+              ...(payload.warnings ?? []),
+              payload.diagnostics?.errors ? `${payload.diagnostics.errors} syntax diagnostic(s) remain` : ''
+            ].filter(Boolean).join('\n')
+          }
         }
       }
     }

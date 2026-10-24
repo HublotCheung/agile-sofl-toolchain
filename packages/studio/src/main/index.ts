@@ -1,15 +1,9 @@
-import { collectHybridAgentDiagnostics } from '@agile-sofl/editor-api'
-import { check } from '@agile-sofl/parser'
-import { setHybridWriteDiagnosticCollector } from '../shared/asflRepair'
+import { collectHybridAgentDiagnostics, collectHybridWriteLintDiagnostics } from '@agile-sofl/editor-api'
+import { setHybridWriteDiagnosticCollector, setHybridWriteLintFallback } from '../shared/asflRepair'
 import { conditionNotice, getExperimentConfig } from './services/llm/experiment'
 
-setHybridWriteDiagnosticCollector((source) => {
-  const fromModel = collectHybridAgentDiagnostics(source)
-  const fromParse = check(source, { fsfL1: false }).diagnostics
-    .filter((d) => d.severity === 'error')
-    .map((d) => ({ severity: d.severity, code: d.code, message: d.message }))
-  return [...fromModel, ...fromParse]
-})
+setHybridWriteDiagnosticCollector((source) => collectHybridAgentDiagnostics(source))
+setHybridWriteLintFallback((source) => collectHybridWriteLintDiagnostics(source))
 import { app, ipcMain, BrowserWindow } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'

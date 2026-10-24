@@ -33,6 +33,8 @@ export function useInformalModel(activeTabId: Ref<string | undefined>) {
     (model.value?.diagnostics ?? []).some((d) => d.severity === 'error')
   )
 
+  const parseBlocked = computed(() => model.value?.meta?.title === 'Invalid')
+
   async function rebuildNow(): Promise<void> {
     const tab = activeTab.value
     if (!tab || !window.studio?.buildInformalModel) return
@@ -105,12 +107,12 @@ export function useInformalModel(activeTabId: Ref<string | undefined>) {
   }
 
   async function patchField(path: string, value: unknown): Promise<void> {
-    if (hasErrors.value) return
+    if (parseBlocked.value) return
     await patchViaIpc({ action: 'patch-field', path, value })
   }
 
   async function patchById(idPath: string, value: unknown): Promise<void> {
-    if (hasErrors.value) return
+    if (parseBlocked.value) return
     await patchViaIpc({ action: 'patch-by-id', idPath, value })
   }
 
@@ -230,6 +232,7 @@ export function useInformalModel(activeTabId: Ref<string | undefined>) {
     model,
     loading,
     hasErrors,
+    parseBlocked,
     rebuildNow,
     patchField,
     patchById,

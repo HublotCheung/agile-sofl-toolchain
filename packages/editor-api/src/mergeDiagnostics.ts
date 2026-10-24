@@ -53,6 +53,11 @@ export function adjustFsfDiagnosticSeverity<T extends { code: string; severity: 
   })
 }
 
+export {
+  adjustRefinementDiagnosticSeverity,
+  hasBlockingHybridDiagnostics
+} from './refinementLint.js'
+
 /** Merge visual (parse/fsf) diagnostics with LSP markers, dropping near-duplicate LSP entries. */
 export function mergeDiagnostics(
   visual: Array<{

@@ -26,6 +26,47 @@ export function toolLabelKey(name: string): string {
   return AGENT_TOOL_LABEL_KEYS[name] || 'agent.tool.generic'
 }
 
+/** Shorter, user-facing text for agent patch failures (full detail stays in tool result). */
+export function formatAgentToolError(raw: string | undefined): string {
+  const text = (raw ?? '').trim()
+  if (!text) return ''
+  if (/Expecting token of type -->/i.test(text)) {
+    const found = /-->\s*'([^']+)'\s*<--/i.exec(text)
+    const expected = /-->\s*([A-Za-z]+)\s*<--/i.exec(text)
+    if (found && expected) {
+      const tokenHint =
+        expected[1] === 'DoubleAmp'
+          ? '「&&」连接子句'
+          : expected[1] === 'RParen'
+            ? '「)」'
+            : expected[1] === 'RBracket'
+              ? '「]」'
+              : `「${expected[1]}」`
+      return `ASFL 语法错误：此处不应出现「${found[1]}」，期望 ${tokenHint}。请改用合法 ASFL（例如用 not A or B 表示蕴含，用 <> 表示不等，用 conc 连接序列）。`
+    }
+    return 'ASFL 语法错误：不变量或谓词不符合语法。请改用合法 ASFL 后重新提交。'
+  }
+  if (/Typed FSF replacement rejected/i.test(text)) {
+    return text.replace(/^Typed FSF replacement rejected before writing:\s*/i, '进程逻辑语法错误：')
+  }
+  if (/Generation provenance is unresolved/i.test(text)) {
+    return '溯源绑定失败：Informal 约束 ID 与 Hybrid 目标（如 inv:模块.序号）不匹配。请让 Agent 先 read 两侧 inventory 再重试。'
+  }
+  if (/Missing generation provenance/i.test(text)) {
+    return '缺少溯源：新建的类型/变量/不变量需要在 traceLinks 中附上对应的 Informal 节点 ID。'
+  }
+  if (/Invalid trace entity metadata/i.test(text)) {
+    return '项目溯源元数据异常。请保存 Informal/Hybrid 文件后刷新项目，或从 Code View 修复 Hybrid 语法错误再试。'
+  }
+  if (/Write kept with/i.test(text)) {
+    return text.replace(/^Write kept with/i, '已写入，仍有语法问题：')
+  }
+  if (/Write not kept/i.test(text)) {
+    return text.replace(/^Write not kept:[^.]*\.\s*/i, '写入被拒绝：会引入新的语法错误。')
+  }
+  return text
+}
+
 function utf8ByteLength(value: string): number {
   let bytes = value.length
   for (let i = 0; i < value.length; i++) {

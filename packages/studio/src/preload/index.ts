@@ -247,6 +247,7 @@ const studio = {
       content: string
       ok: boolean
       error?: string
+      warnings?: string[]
     }>,
   llmStatus: () =>
     ipcRenderer.invoke('studio:llm-status') as Promise<{
@@ -418,18 +419,25 @@ const studio = {
     ipcRenderer.invoke('studio:patch-hybrid-spec', JSON.parse(JSON.stringify(payload))) as Promise<{
       content: string
       error?: string
+      warnings?: string[]
+      lintWarnings?: string[]
+      opFailures?: string[]
     }>,
   acceptHybridWrite: (payload: { before: string; after: string }) =>
     ipcRenderer.invoke('studio:accept-hybrid-write', payload) as Promise<{
       ok: boolean
       content: string
+      committed?: boolean
       error?: string
       repairNotes?: string[]
+      warnings?: string[]
+      diagnostics?: { errors: number; warnings: number; items: Array<{ severity: string; code: string; message: string }> }
     }>,
   refinementStep: (payload: { source: string; projectRoot: string; step: Record<string, unknown> }) =>
     ipcRenderer.invoke('studio:refinement-step', JSON.parse(JSON.stringify(payload))) as Promise<{
       source: string
       error?: string
+      warnings?: string[]
       state: unknown
       repairNotes?: string[]
     }>,
@@ -919,6 +927,7 @@ export type AgentSessionPayload = {
     pending?: boolean
     resolution?: 'applied' | 'rejected' | 'answered' | 'error'
     toolError?: string
+    toolWarning?: string
   }>
   context: {
     skillId?: string

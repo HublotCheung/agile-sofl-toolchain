@@ -1,6 +1,6 @@
 import { registerTraceHandlers } from './traceService'
 import { generatedIRTraceLinks } from './traceEngine'
-import { acceptHybridWrite } from '../../shared/asflRepair'
+import { acceptHybridWrite, repairAsflSurface } from '../../shared/asflRepair'
 import { ipcMain } from 'electron'
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -469,6 +469,17 @@ export function registerParseHandlers(): void {
     return Boolean(proc?.body?.fsf)
   })
 
+  function gateInvariantWrite(before: string, after: string): string {
+    if (after === before) return before
+    return acceptHybridWrite(before, after).content
+  }
+
+  function invTextInput(text: string | undefined): string {
+    const raw = (text ?? '').trim()
+    if (!raw) return 'true'
+    return repairAsflSurface(raw).text.trim()
+  }
+
   ipcMain.handle(
     'studio:patch-invariant',
     (
@@ -486,7 +497,8 @@ export function registerParseHandlers(): void {
     ) => {
       const action = payload.action ?? 'patch'
       if (action === 'add' && payload.moduleName) {
-        return addInvariant(payload.source, payload.moduleName, payload.text ?? 'true')
+        const next = addInvariant(payload.source, payload.moduleName, invTextInput(payload.text))
+        return gateInvariantWrite(payload.source, next)
       }
       if (action === 'remove' && payload.moduleName) {
         if (typeof payload.index === 'number') {
@@ -510,10 +522,17 @@ export function registerParseHandlers(): void {
         typeof payload.index === 'number' &&
         payload.text != null
       ) {
-        return patchInvariantByIndex(payload.source, payload.moduleName, payload.index, payload.text)
+        const next = patchInvariantByIndex(
+          payload.source,
+          payload.moduleName,
+          payload.index,
+          invTextInput(payload.text)
+        )
+        return gateInvariantWrite(payload.source, next)
       }
       if (payload.span && payload.text != null) {
-        return patchInvariant(payload.source, payload.span, payload.text)
+        const next = patchInvariant(payload.source, payload.span, invTextInput(payload.text))
+        return gateInvariantWrite(payload.source, next)
       }
       return payload.source
     }

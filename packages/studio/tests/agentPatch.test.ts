@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appliedToolResult,
   assistantTurnIsComplete,
   continuationUserText,
   crudBlockedByFailures,
@@ -15,16 +16,17 @@ import {
 } from '../src/renderer/lib/agentWriteMode'
 
 describe('validateAgentPatch', () => {
-  it('rejects replace-document dumps', () => {
+  it('warns on replace-document dumps but still accepts the patch card', () => {
     const r = validateAgentPatch('hybrid', {
       target: 'hybrid',
       operations: [{ op: 'replace-document', asflText: 'module Foo;\nend_module' }]
     })
+    expect(r.accept).toBe(true)
     expect(r.ok).toBe(false)
-    expect(r.message).toMatch(/CRUD/)
+    expect(r.warnings.join(' ')).toMatch(/CRUD/)
   })
 
-  it('rejects end_module inside pre/post fields', () => {
+  it('warns on end_module inside pre/post fields', () => {
     const r = validateAgentPatch('hybrid', {
       target: 'hybrid',
       operations: [
@@ -36,11 +38,11 @@ describe('validateAgentPatch', () => {
         }
       ]
     })
-    expect(r.ok).toBe(false)
-    expect(r.message).toMatch(/end_module/)
+    expect(r.accept).toBe(true)
+    expect(r.warnings.join(' ')).toMatch(/end_module/)
   })
 
-  it('rejects whole-module text on add', () => {
+  it('warns on whole-module text on add', () => {
     const r = validateAgentPatch('hybrid', {
       target: 'hybrid',
       operations: [
@@ -52,7 +54,8 @@ describe('validateAgentPatch', () => {
         }
       ]
     })
-    expect(r.ok).toBe(false)
+    expect(r.accept).toBe(true)
+    expect(r.warnings.length).toBeGreaterThan(0)
   })
 
   it('accepts modular CRUD adds', () => {
@@ -132,6 +135,21 @@ describe('continuationUserText', () => {
   })
 })
 
+describe('appliedToolResult', () => {
+  it('keeps ok true when diagnostics remain after a write', () => {
+    const raw = appliedToolResult({
+      diagnostics: { errors: 2, warnings: 0, items: [] },
+      warnings: ['Write kept with 2 new syntax issue(s).']
+    })
+    const parsed = JSON.parse(raw) as { action: string; ok: boolean; diagnostics: { errors: number } }
+    expect(parsed.action).toBe('applied')
+    expect(parsed.ok).toBe(true)
+    expect(parsed.diagnostics.errors).toBe(2)
+    expect(continuationUserText(raw)).toMatch(/succeeded|was applied/i)
+    expect(continuationUserText(raw)).toMatch(/syntax error/)
+  })
+})
+
 describe('assistantTurnIsComplete', () => {
   it('treats a text reply with no tools as a finished summary', () => {
     expect(assistantTurnIsComplete('已完成 Informal 规格。', 0)).toBe(true)
@@ -150,7 +168,7 @@ describe('crudBlockedByFailures', () => {
       { fingerprint: 'same', error: 'x', count: 1, mode: 'crud' },
       { fingerprint: 'same', mode: 'crud' }
     )
-    expect(msg).toMatch(/already failed/)
+    expect(msg).toMatch(/did not change/)
     expect(msg).toMatch(/propose_source_edit/)
   })
 
@@ -179,7 +197,7 @@ describe('nextFailedWrite', () => {
     expect(first.count).toBe(1)
     expect(second.count).toBe(2)
     expect(crudBlockedByFailures(second, { fingerprint: 'c', mode: 'crud' })).toBeNull()
-    expect(crudBlockedByFailures(second, { fingerprint: 'b', mode: 'crud' })).toMatch(/already failed/)
+    expect(crudBlockedByFailures(second, { fingerprint: 'b', mode: 'crud' })).toMatch(/did not change/)
   })
 })
 

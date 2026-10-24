@@ -24,7 +24,7 @@ const toolCall = (name: string, args: unknown) => sse([
 afterEach(() => vi.unstubAllGlobals())
 
 describe('headless agent harness', () => {
-  it('asks the agent to repair missing modeling provenance before offering a patch',async()=>{
+  it('offers a hybrid patch with a provenance warning when traceLinks are missing',async()=>{
     process.env.ECNU_API_KEY='sk-testtesttesttest'
     const operations=[{op:'add',kind:'process',parentId:'mod:Library',name:'Borrow'}]
     const replies=[
@@ -40,7 +40,7 @@ describe('headless agent harness', () => {
     const result=await runOnce({condition:'T',informalPath:inf,outDir:mkdtempSync(join(tmpdir(),'provenance-out-')),initialHybridAsfl:'module SYSTEM_Library;\nend_module;',maxApprovals:1,onStudyEvent:e=>events.push(e)})
     expect(result.approvals).toBe(1)
     expect(events.filter(e=>e.type==='proposal')).toHaveLength(1)
-    expect(JSON.stringify(fetchMock.mock.calls)).toContain('Missing or invalid modeling provenance')
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('Missing or invalid modeling provenance')
   },60000)
   it('retains the task and latest steering after a long sequence of tool results', () => {
     const messages: any[] = [{ id: 'u1', role: 'user', content: 'Original maintenance task' },
